@@ -1,0 +1,3 @@
+# Prebuilt agent binaries are not checked in.
+# Run scripts/build-agents.sh to generate them.
+**/sshfwd-agent
