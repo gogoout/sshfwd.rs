@@ -1,0 +1,13 @@
+[package]
+name = "sshfwd"
+version = "0.1.0"
+edition = "2021"
+build = "build.rs"
+
+[dependencies]
+sshfwd-common = { workspace = true }
+serde_json = { workspace = true }
+openssh = { workspace = true, features = ["process-mux"] }
+tokio = { workspace = true, features = ["full"] }
+sha2 = { workspace = true }
+thiserror = { workspace = true }

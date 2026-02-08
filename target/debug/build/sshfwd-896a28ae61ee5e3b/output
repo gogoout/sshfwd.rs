@@ -1,0 +1,9 @@
+cargo:rerun-if-changed=/Users/gogoout/IdeaProjects/sshfwd.rs/crates/sshfwd/../../prebuilt-agents/linux-x86_64/sshfwd-agent
+cargo:rerun-if-changed=/Users/gogoout/IdeaProjects/sshfwd.rs/crates/sshfwd/../../prebuilt-agents/linux-aarch64/sshfwd-agent
+cargo:rerun-if-changed=/Users/gogoout/IdeaProjects/sshfwd.rs/crates/sshfwd/../../prebuilt-agents/darwin-x86_64/sshfwd-agent
+cargo:rerun-if-changed=/Users/gogoout/IdeaProjects/sshfwd.rs/crates/sshfwd/../../prebuilt-agents/darwin-aarch64/sshfwd-agent
+cargo:rerun-if-changed=/Users/gogoout/IdeaProjects/sshfwd.rs/crates/sshfwd/../../prebuilt-agents
+cargo:rerun-if-changed=/Users/gogoout/IdeaProjects/sshfwd.rs/crates/sshfwd/../../prebuilt-agents/darwin-aarch64
+cargo:rerun-if-changed=/Users/gogoout/IdeaProjects/sshfwd.rs/crates/sshfwd/../../prebuilt-agents/linux-x86_64
+cargo:rerun-if-changed=/Users/gogoout/IdeaProjects/sshfwd.rs/crates/sshfwd/../../prebuilt-agents/linux-aarch64
+cargo:rerun-if-changed=/Users/gogoout/IdeaProjects/sshfwd.rs/crates/sshfwd/../../prebuilt-agents/darwin-x86_64

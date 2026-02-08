@@ -1,0 +1,14 @@
+/Users/gogoout/IdeaProjects/sshfwd.rs/target/aarch64-apple-darwin/release-agent/deps/libserde-c75fdf81bc271ebe.rmeta: /Users/gogoout/.cargo/registry/src/index.crates.io-6f17d22bba15001f/serde-1.0.228/src/lib.rs /Users/gogoout/.cargo/registry/src/index.crates.io-6f17d22bba15001f/serde-1.0.228/src/integer128.rs /Users/gogoout/.cargo/registry/src/index.crates.io-6f17d22bba15001f/serde-1.0.228/src/private/mod.rs /Users/gogoout/.cargo/registry/src/index.crates.io-6f17d22bba15001f/serde-1.0.228/src/private/de.rs /Users/gogoout/.cargo/registry/src/index.crates.io-6f17d22bba15001f/serde-1.0.228/src/private/ser.rs /Users/gogoout/IdeaProjects/sshfwd.rs/target/aarch64-apple-darwin/release-agent/build/serde-b941fcfca34f2a63/out/private.rs
+
+/Users/gogoout/IdeaProjects/sshfwd.rs/target/aarch64-apple-darwin/release-agent/deps/libserde-c75fdf81bc271ebe.rlib: /Users/gogoout/.cargo/registry/src/index.crates.io-6f17d22bba15001f/serde-1.0.228/src/lib.rs /Users/gogoout/.cargo/registry/src/index.crates.io-6f17d22bba15001f/serde-1.0.228/src/integer128.rs /Users/gogoout/.cargo/registry/src/index.crates.io-6f17d22bba15001f/serde-1.0.228/src/private/mod.rs /Users/gogoout/.cargo/registry/src/index.crates.io-6f17d22bba15001f/serde-1.0.228/src/private/de.rs /Users/gogoout/.cargo/registry/src/index.crates.io-6f17d22bba15001f/serde-1.0.228/src/private/ser.rs /Users/gogoout/IdeaProjects/sshfwd.rs/target/aarch64-apple-darwin/release-agent/build/serde-b941fcfca34f2a63/out/private.rs
+
+/Users/gogoout/IdeaProjects/sshfwd.rs/target/aarch64-apple-darwin/release-agent/deps/serde-c75fdf81bc271ebe.d: /Users/gogoout/.cargo/registry/src/index.crates.io-6f17d22bba15001f/serde-1.0.228/src/lib.rs /Users/gogoout/.cargo/registry/src/index.crates.io-6f17d22bba15001f/serde-1.0.228/src/integer128.rs /Users/gogoout/.cargo/registry/src/index.crates.io-6f17d22bba15001f/serde-1.0.228/src/private/mod.rs /Users/gogoout/.cargo/registry/src/index.crates.io-6f17d22bba15001f/serde-1.0.228/src/private/de.rs /Users/gogoout/.cargo/registry/src/index.crates.io-6f17d22bba15001f/serde-1.0.228/src/private/ser.rs /Users/gogoout/IdeaProjects/sshfwd.rs/target/aarch64-apple-darwin/release-agent/build/serde-b941fcfca34f2a63/out/private.rs
+
+/Users/gogoout/.cargo/registry/src/index.crates.io-6f17d22bba15001f/serde-1.0.228/src/lib.rs:
+/Users/gogoout/.cargo/registry/src/index.crates.io-6f17d22bba15001f/serde-1.0.228/src/integer128.rs:
+/Users/gogoout/.cargo/registry/src/index.crates.io-6f17d22bba15001f/serde-1.0.228/src/private/mod.rs:
+/Users/gogoout/.cargo/registry/src/index.crates.io-6f17d22bba15001f/serde-1.0.228/src/private/de.rs:
+/Users/gogoout/.cargo/registry/src/index.crates.io-6f17d22bba15001f/serde-1.0.228/src/private/ser.rs:
+/Users/gogoout/IdeaProjects/sshfwd.rs/target/aarch64-apple-darwin/release-agent/build/serde-b941fcfca34f2a63/out/private.rs:
+
+# env-dep:OUT_DIR=/Users/gogoout/IdeaProjects/sshfwd.rs/target/aarch64-apple-darwin/release-agent/build/serde-b941fcfca34f2a63/out

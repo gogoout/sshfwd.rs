@@ -1,0 +1,1 @@
+/Users/gogoout/IdeaProjects/sshfwd.rs/target/debug/libsshfwd_common.rlib: /Users/gogoout/IdeaProjects/sshfwd.rs/crates/sshfwd-common/src/lib.rs /Users/gogoout/IdeaProjects/sshfwd.rs/crates/sshfwd-common/src/types.rs
