@@ -63,7 +63,7 @@ A TUI-based SSH port forwarding management tool built with Rust.
    - Runtime platform detection: detects remote OS + architecture via `uname -sm`
    - Agent deployment: hash verification, atomic upload, stale process cleanup
    - Port discovery stream: reads agent stdout, parses JSON, emits events with retry logic
-   - CLI: connects, deploys agent, displays updates, handles Ctrl+C shutdown
+   - TUI: k9s-inspired ratatui interface with Elm Architecture (TEA), vim-style keyboard navigation
 
 ### Data Flow
 
@@ -135,29 +135,32 @@ The build process automatically embeds all agent binaries (from `prebuilt-agents
 # Connect to a remote server (auto-detects platform and deploys agent)
 sshfwd user@hostname
 
-# Example output:
-# Connecting to hostname...
-# Connected. Deploying agent...
-# Agent running. Streaming port snapshots (Ctrl+C to stop)...
-#
-# [scan #0] user@hostname | 5 ports | 0 warnings
-#    8080/tcp  0.0.0.0 -> node (pid 12345)
-#    3000/tcp  127.0.0.1 -> rails (pid 67890)
-#    5432/tcp  127.0.0.1 -> postgres (pid 11111)
-
 # Development: override agent binary for testing
 sshfwd user@hostname --agent-path ./custom/sshfwd-agent
 ```
 
-### Current Status
+The TUI shows a k9s-style bordered table with live port data:
 
-The tool currently operates in **discovery mode** - it connects to a remote server, deploys a lightweight agent, and streams real-time port information to the console. The TUI interface with interactive port forwarding management is planned for the next phase.
+```
+╭ ⠹ user@host │ 5 ports ─────────────────────────────╮
+│ PORT    PROTO   PID      COMMAND                     │
+│▶5432    tcp     1234     /usr/lib/postgresql/15/...   │
+│ 8080    tcp6    5678     /usr/bin/node server.js      │
+│ 3000    tcp     9012     /usr/bin/ruby bin/rails s    │
+│                                                      │
+╰──────────────────────────────────────────────────────╯
+ <j/k>Navigate <g/G>Top/Bottom <q>Quit
+```
 
 ### Keyboard Shortcuts
 
-- **Ctrl+C** - Stop the agent and disconnect
-
-_(Full TUI keyboard shortcuts will be documented once the interface is implemented)_
+| Key | Action |
+|-----|--------|
+| `j` / `Down` | Move selection down |
+| `k` / `Up` | Move selection up |
+| `g` | Jump to top |
+| `G` | Jump to bottom |
+| `q` / `Esc` / `Ctrl+C` | Quit |
 
 ## Comparison with VS Code Remote
 
@@ -216,10 +219,14 @@ Latest test (2024-02-08) against Linux x86_64 server:
 - [x] Atomic agent deployment with hash verification
 - [x] Stale process cleanup and graceful shutdown
 
-**Phase 2: TUI Interface** (In Progress)
-- [ ] ratatui-based terminal UI
-- [ ] Port list view with keyboard navigation
-- [ ] Real-time updates and visual feedback
+**Phase 2: TUI Interface** ✅ Complete
+- [x] ratatui-based terminal UI (Elm Architecture / TEA)
+- [x] k9s-style bordered table with rounded corners
+- [x] Port list with columns: PORT, PROTO, PID, COMMAND
+- [x] Vim-style keyboard navigation (j/k, g/G)
+- [x] Animated spinner for connection heartbeat
+- [x] Stable row ordering (sorted by port, PID, proto) to prevent flickering
+- [x] Conditional rendering — only redraws when state changes
 - [ ] Port forwarding toggle functionality
 - [ ] Connection history persistence
 - [ ] Port annotation system
