@@ -313,6 +313,7 @@ impl<'s> AgentManager<'s> {
     }
 
     /// Kill the remote agent gracefully (for shutdown).
+    #[allow(dead_code)]
     pub async fn kill_remote_agent(&self) {
         self.kill_stale_agent().await;
     }
