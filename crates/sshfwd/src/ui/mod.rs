@@ -4,7 +4,8 @@ pub mod table;
 
 use ratatui::layout::{Constraint, Layout, Rect};
 
-pub const SPINNER_CHARS: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+pub const CONNECTED_CHAR: char = '●';
+pub const CONNECTING_CHAR: char = '●';
 pub const DISCONNECT_CHAR: char = '●';
 
 pub struct LayoutAreas {
