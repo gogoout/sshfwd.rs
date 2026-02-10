@@ -33,10 +33,11 @@ A TUI-based SSH port forwarding management tool built with Rust.
 ## Technology Stack
 
 - **UI Framework**: [ratatui](https://github.com/ratatui-org/ratatui) - Terminal user interface library
+- **Event Loop**: [crossbeam-channel](https://github.com/crossbeam-rs/crossbeam) - dua-cli-inspired synchronous event loop with bare `crossterm::event::read()`
 - **SSH**: [openssh](https://crates.io/crates/openssh) - Wrapper around system OpenSSH
-- **Async Runtime**: [tokio](https://tokio.rs/) - Async I/O
+- **Async Runtime**: [tokio](https://tokio.rs/) - Async I/O for SSH and discovery
 - **Language**: Rust
-- **Inspiration**: k9s keyboard layout and interface design
+- **Inspiration**: k9s keyboard layout, dua-cli event loop
 
 ## Architecture
 
@@ -64,6 +65,7 @@ A TUI-based SSH port forwarding management tool built with Rust.
    - Agent deployment: hash verification, atomic upload, stale process cleanup
    - Port discovery stream: reads agent stdout, parses JSON, emits events with retry logic
    - TUI: k9s-inspired ratatui interface with Elm Architecture (TEA), vim-style keyboard navigation
+   - Event loop: dua-cli pattern — bare `crossterm::event::read()` on OS thread, `crossbeam_channel::select!` multiplexing, `BufWriter` backend
 
 ### Data Flow
 
@@ -142,7 +144,7 @@ sshfwd user@hostname --agent-path ./custom/sshfwd-agent
 The TUI shows a k9s-style bordered table with live port data:
 
 ```
-╭ ⠹ user@host │ 5 ports ─────────────────────────────╮
+╭ ● user@host │ 5 ports ─────────────────────────────╮
 │ PORT    PROTO   PID      COMMAND                     │
 │▶5432    tcp     1234     /usr/lib/postgresql/15/...   │
 │ 8080    tcp6    5678     /usr/bin/node server.js      │
@@ -224,7 +226,7 @@ Latest test (2024-02-08) against Linux x86_64 server:
 - [x] k9s-style bordered table with rounded corners
 - [x] Port list with columns: PORT, PROTO, PID, COMMAND
 - [x] Vim-style keyboard navigation (j/k, g/G)
-- [x] Animated spinner for connection heartbeat
+- [x] Connection status indicator (colored dot)
 - [x] Stable row ordering (sorted by port, PID, proto) to prevent flickering
 - [x] Conditional rendering — only redraws when state changes
 - [ ] Port forwarding toggle functionality
