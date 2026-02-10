@@ -4,7 +4,8 @@ use crate::app::Message;
 
 pub fn crossterm_event_to_message(event: Event) -> Option<Message> {
     match event {
-        Event::Key(key) if key.kind == KeyEventKind::Press => match key.code {
+        // Accept Press and Repeat, ignore Release (matches dua-cli's pattern)
+        Event::Key(key) if key.kind != KeyEventKind::Release => match key.code {
             KeyCode::Char('q') => Some(Message::Quit),
             KeyCode::Esc => Some(Message::Quit),
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {

@@ -2,19 +2,13 @@ use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 
 use crate::app::{ConnectionState, Model};
-use crate::ui::{DISCONNECT_CHAR, SPINNER_CHARS};
+use crate::ui::{CONNECTED_CHAR, CONNECTING_CHAR, DISCONNECT_CHAR};
 
 /// Builds the title Line used in the table block border.
 pub fn build_title(model: &Model) -> Line<'_> {
     let (indicator, indicator_style) = match model.connection_state {
-        ConnectionState::Connecting => (
-            SPINNER_CHARS[model.spinner_frame],
-            Style::default().fg(Color::Yellow),
-        ),
-        ConnectionState::Connected => (
-            SPINNER_CHARS[model.spinner_frame],
-            Style::default().fg(Color::Green),
-        ),
+        ConnectionState::Connecting => (CONNECTING_CHAR, Style::default().fg(Color::Yellow)),
+        ConnectionState::Connected => (CONNECTED_CHAR, Style::default().fg(Color::Green)),
         ConnectionState::Disconnected => (DISCONNECT_CHAR, Style::default().fg(Color::Red)),
     };
 

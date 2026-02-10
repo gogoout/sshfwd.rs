@@ -1,11 +1,10 @@
 use std::time::Instant;
 
-use sshfwd_common::types::{ListeningPort, Protocol, ScanResult};
+use sshfwd_common::types::{Protocol, ScanResult};
 
 use crate::error::DiscoveryError;
 
 const STALENESS_THRESHOLD_SECS: u64 = 6;
-const SPINNER_ADVANCE_TICKS: u64 = 5;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConnectionState {
@@ -36,13 +35,11 @@ pub struct Model {
     pub destination: String,
     pub hostname: Option<String>,
     pub username: Option<String>,
-    pub ports: Vec<ListeningPort>,
+    pub ports: Vec<sshfwd_common::types::ListeningPort>,
     pub scan_index: u64,
     pub selected_index: usize,
     pub connection_state: ConnectionState,
     pub last_scan_at: Option<Instant>,
-    pub spinner_frame: usize,
-    pub tick_count: u64,
     pub running: bool,
     pub needs_render: bool,
 }
@@ -58,8 +55,6 @@ impl Model {
             selected_index: 0,
             connection_state: ConnectionState::Connecting,
             last_scan_at: None,
-            spinner_frame: 0,
-            tick_count: 0,
             running: true,
             needs_render: true,
         }
@@ -72,8 +67,10 @@ pub fn update(model: &mut Model, msg: Message) {
             model.hostname = Some(scan.hostname);
             model.username = Some(scan.username);
             model.scan_index = scan.scan_index;
-            model.connection_state = ConnectionState::Connected;
             model.last_scan_at = Some(Instant::now());
+
+            let was_connecting = model.connection_state == ConnectionState::Connecting;
+            model.connection_state = ConnectionState::Connected;
 
             let mut ports = scan.ports;
             ports.sort_by(|a, b| {
@@ -100,6 +97,8 @@ pub fn update(model: &mut Model, msg: Message) {
                     model.selected_index = model.ports.len() - 1;
                 }
                 model.needs_render = true;
+            } else if was_connecting {
+                model.needs_render = true; // render green dot on first scan
             }
         }
         Message::DiscoveryWarning(_) => {
@@ -146,16 +145,6 @@ pub fn update(model: &mut Model, msg: Message) {
             model.running = false;
         }
         Message::Tick => {
-            model.tick_count += 1;
-            // Advance spinner every N ticks
-            if model.tick_count % SPINNER_ADVANCE_TICKS == 0 {
-                let old_frame = model.spinner_frame;
-                model.spinner_frame = (model.spinner_frame + 1) % crate::ui::SPINNER_CHARS.len();
-                if model.spinner_frame != old_frame {
-                    model.needs_render = true;
-                }
-            }
-            // Check staleness
             if let Some(last) = model.last_scan_at {
                 if last.elapsed().as_secs() >= STALENESS_THRESHOLD_SECS
                     && model.connection_state == ConnectionState::Connected

@@ -12,5 +12,5 @@ tokio = { workspace = true, features = ["full"] }
 sha2 = { workspace = true }
 thiserror = { workspace = true }
 ratatui = { workspace = true, features = ["crossterm"] }
-crossterm = { workspace = true, features = ["event-stream"] }
-futures = { workspace = true }
+crossterm = { workspace = true, features = ["use-dev-tty"] }
+crossbeam-channel = { workspace = true }

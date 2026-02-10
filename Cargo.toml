@@ -22,6 +22,7 @@ futures = "0.3"
 # TUI
 ratatui = "0.29"
 crossterm = "0.28"
+crossbeam-channel = "0.5"
 
 # Cryptography
 sha2 = "0.10"
