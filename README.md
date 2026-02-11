@@ -9,41 +9,20 @@
 
 A TUI-based SSH port forwarding management tool built with Rust. Inspired by [k9s](https://github.com/derailed/k9s)' keyboard-driven interface.
 
+![Demo](assets/demo.gif)
+
 ## Features
 
-- **Automatic Port Detection** — Deploys a lightweight agent to the remote host that streams listening ports in real time
-- **One-Key Forwarding** — Press `Enter`/`f` to forward a port with matching local port, `F`/`Shift+Enter` for a custom local port
-- **Smart Port Lifecycle** — Automatically pauses forwards when remote port disappears (service stops) and reactivates when it returns (unlike VS Code which keeps stale forwards active)
-- **Error Recovery** — Bind failures open a modal dialog to pick a different port instead of silently falling back
-- **Forwarded Ports Grouped at Top** — Active forwards are visually separated from unforwarded ports
-- **Persistence** — Forwarded ports are remembered across sessions per destination (`~/.sshfwd/forwards.json`)
-- **Pure Rust SSH** — Uses `russh` for in-process SSH with no system OpenSSH dependency
-- **ProxyJump Support** — Recursive tunneling through jump hosts via SSH config
+- **Automatic port detection** — deploys a lightweight agent that streams listening ports in real time
+- **One-key forwarding** — `Enter`/`f` to forward with matching local port, `F`/`Shift+Enter` for custom port
+- **Smart lifecycle management** — auto-pauses when remote port disappears, reactivates when it returns (unlike VS Code's stale forwards)
+- **Clear error recovery** — bind failures show a modal to choose a different port (no silent fallbacks)
+- **Visual grouping** — forwarded ports appear at the top, separated from unforwarded ports
+- **Session persistence** — remembers active forwards per destination in `~/.sshfwd/forwards.json`
+- **Pure Rust SSH** — no system OpenSSH dependency, uses `russh` for in-process connections
+- **ProxyJump support** — recursive tunneling through jump hosts via SSH config
 
 ## Platform Support
-
-**Remote servers (agent):**
-- Linux x86_64 / ARM64 (aarch64) — statically linked via musl
-
-**Local machine (main app):**
-- macOS (Apple Silicon & Intel)
-- Linux
-
-> The main app automatically detects the remote platform and deploys the correct agent binary. No manual configuration needed.
-
-## Installation
-
-### Quick Install
-
-Install directly via cargo:
-
-```bash
-cargo install sshfwd
-```
-
-The published crate includes prebuilt agent binaries for all supported platforms (Linux x86_64/ARM64, macOS Intel/ARM64). The agent is automatically deployed to remote servers when you connect.
-
-### Platform Support
 
 **Remote servers (agent):**
 - Linux x86_64 / ARM64 (aarch64) — statically linked via musl
@@ -54,27 +33,15 @@ The published crate includes prebuilt agent binaries for all supported platforms
 - Linux (x86_64 / ARM64)
 - Windows via WSL (experimental)
 
-### Build from Source
+> The agent is automatically deployed when you connect. No manual configuration needed.
 
-For development or unsupported platforms:
+## Installation
 
-**Prerequisites:**
-- Rust 1.82.0 or later
-- For Linux agent cross-compilation on macOS: `brew install filosottile/musl-cross/musl-cross`
-
-**Build:**
 ```bash
-git clone https://github.com/gogoout/sshfwd.rs.git
-cd sshfwd.rs
-
-# Cross-compile agents for all platforms
-./scripts/build-agents.sh
-
-# Build and install the main application
-cargo install --path crates/sshfwd
+cargo install sshfwd
 ```
 
-For development, use `cargo build --release -p sshfwd` to build without installing.
+The published crate includes prebuilt agent binaries for all supported platforms. The agent is automatically deployed to remote servers when you connect.
 
 ## Usage
 
@@ -86,7 +53,7 @@ sshfwd user@hostname
 sshfwd user@hostname --agent-path ./target/debug/sshfwd-agent
 ```
 
-### TUI
+### TUI Interface
 
 ```
 ╭ ● user@host │ 5 ports │ 2 fwd ────────────────────╮
@@ -128,33 +95,58 @@ When pressing `F`/`Shift+Enter`, or when a bind error occurs:
 | `F` / `Shift+Enter` | Forward with custom local port (modal) |
 | `q` / `Esc` / `Ctrl+C` | Quit |
 
-## Architecture
+## Development
 
-### Workspace Crates
+### Build from Source
 
+**Prerequisites:**
+- Rust 1.82.0 or later
+- For Linux agent cross-compilation on macOS: `brew install filosottile/musl-cross/musl-cross`
+
+**Build:**
+```bash
+git clone https://github.com/gogoout/sshfwd.rs.git
+cd sshfwd.rs
+
+# Cross-compile agents for all platforms
+./scripts/build-agents.sh
+
+# Build and install the main application
+cargo install --path crates/sshfwd
+```
+
+For development, use `cargo build --release -p sshfwd` to build without installing.
+
+### Verification
+
+```bash
+cargo fmt -- --check
+cargo clippy --all-targets --all-features
+cargo test --workspace
+```
+
+All checks run automatically in CI. Pull requests must pass before merging.
+
+See [CLAUDE.md](./CLAUDE.md) for development rules and workspace conventions.
+
+### Architecture
+
+**Workspace Crates:**
 1. **sshfwd-common** — Shared types (`ScanResult`, `ListeningPort`, `AgentResponse`), serialized as JSON
 2. **sshfwd-agent** — Remote binary deployed via SSH. Parses `/proc/net/tcp{,6}`, maps inodes to processes, streams JSON snapshots every 2s
 3. **sshfwd** — Main application: SSH session, agent deployment, TUI, port forwarding
 
-### TUI Architecture (Elm / TEA)
+**TUI Architecture (Elm / TEA):**
+- All state flows through `app.rs` with a pure Model/Message/update/view pattern
+- Event loop uses the [dua-cli pattern](https://github.com/Byron/dua-cli): dedicated OS thread for keyboard input, `crossbeam_channel::select!` multiplexing
 
-All state flows through `app.rs`:
-- **Model** — single state struct (ports, forwards, connection state, modal, selection)
-- **Message** — enum of all events (scan data, key press, forward events, tick)
-- **update()** — pure state transitions, returns `ForwardCommand`s
-- **view()** — renders table, hotkey bar, and optional modal overlay
-
-Event loop uses the [dua-cli pattern](https://github.com/Byron/dua-cli): bare `crossterm::event::read()` on a dedicated OS thread, `crossbeam_channel::select!` multiplexing keyboard + background channels.
-
-### Port Forwarding
-
+**Port Forwarding:**
 - `ForwardManager` runs on a tokio runtime alongside discovery
 - Each forward binds a local `TcpListener`, accepts connections, and tunnels them via `russh` `channel_open_direct_tcpip`
-- Forward state: `Starting` → `Active` / `Paused` (port disappeared from scan) / reopened on bind error
-- Forwards persist to `~/.sshfwd/forwards.json` keyed by destination; restored as `Paused` on next connection
+- Forward states: `Starting` → `Active` / `Paused` (port disappeared) / modal reopened on bind error
+- Forwards persist to `~/.sshfwd/forwards.json` keyed by destination
 
-### Data Flow
-
+**Data Flow:**
 ```
 ┌─ Main App ──────────┐                   ┌──── Remote Server ────┐
 │                     │                   │                       │
@@ -167,31 +159,13 @@ Event loop uses the [dua-cli pattern](https://github.com/Byron/dua-cli): bare `c
 └─────────────────────┘                   └───────────────────────┘
 ```
 
-### Key Design Decisions
-
+**Key Design Decisions:**
 - **Pure Rust SSH** — `russh` avoids spawning SSH master processes that fight with the TUI for terminal control
 - **Agent-based discovery** — persistent remote process streams port data; no repeated `exec` calls
 - **Hash-based deployment** — only uploads agent binary if SHA256 differs from what's already on the remote
 - **Atomic upload** — temp file → `mv` → `chmod +x` prevents mid-upload execution
 - **Stale cleanup** — verifies `/proc/{pid}/comm` before killing to avoid hitting reused PIDs
 - **No random port fallback** — bind failures surface immediately via error modal so the user stays in control
-
-## Development
-
-```bash
-# Build agents + main app
-./scripts/build-agents.sh
-cargo build -p sshfwd
-
-# Verify
-cargo fmt -- --check
-cargo clippy --all-targets --all-features
-cargo test --workspace
-```
-
-All checks run automatically in CI. Pull requests must pass before merging.
-
-See [CLAUDE.md](./CLAUDE.md) for development rules and workspace conventions.
 
 ## License
 
