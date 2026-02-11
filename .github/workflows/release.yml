@@ -128,10 +128,18 @@ jobs:
 
       - name: Make agent binaries executable
         run: |
-          chmod +x crates/sshfwd/prebuilt-agents/linux-x86_64/sshfwd-agent
-          chmod +x crates/sshfwd/prebuilt-agents/linux-aarch64/sshfwd-agent
-          chmod +x crates/sshfwd/prebuilt-agents/darwin-x86_64/sshfwd-agent
-          chmod +x crates/sshfwd/prebuilt-agents/darwin-aarch64/sshfwd-agent
+          AGENT_DIR="crates/sshfwd/prebuilt-agents"
+          REQUIRED_PLATFORMS=("linux-x86_64" "linux-aarch64" "darwin-x86_64" "darwin-aarch64")
+
+          for platform in "${REQUIRED_PLATFORMS[@]}"; do
+            binary="$AGENT_DIR/$platform/sshfwd-agent"
+
+            if [ -f "$binary" ]; then
+              chmod +x "$binary" || echo "Warning: failed to make $binary executable (will be checked in verification step)"
+            else
+              echo "Note: $binary not found during chmod step (will be checked in verification step)"
+            fi
+          done
 
       - name: Verify agent binaries before publishing
         run: |
