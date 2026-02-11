@@ -9,6 +9,6 @@ description = "Remote agent binary for sshfwd (embedded in main app, not publish
 publish = false
 
 [dependencies]
-sshfwd-common = { version = "0.1.0", path = "../sshfwd-common" }
+sshfwd-common = { workspace = true }
 serde_json = { workspace = true }
 libc = { workspace = true }
