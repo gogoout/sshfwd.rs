@@ -26,3 +26,22 @@ cargo clippy --all-targets --all-features
 cargo test --workspace                      # 22 tests
 cargo build -p sshfwd
 ```
+
+## Publishing to crates.io
+
+**IMPORTANT:** Never run `cargo publish` from local machine. Publishing is automated via GitHub Actions.
+
+**Release process:**
+1. Update version in root `Cargo.toml`:
+   - `[workspace.package]` version
+   - `[workspace.dependencies]` sshfwd-common version
+2. Commit: `git add Cargo.toml && git commit -m "Bump version to X.Y.Z"`
+3. Tag: `git tag vX.Y.Z && git push origin vX.Y.Z`
+4. GitHub Actions automatically:
+   - Builds agent binaries for all platforms (Linux x86_64/ARM64, macOS Intel/ARM64)
+   - Publishes `sshfwd-common` to crates.io
+   - Waits 60 seconds for index update
+   - Publishes `sshfwd` to crates.io with embedded agents
+
+**Requirements:**
+- `CARGO_REGISTRY_TOKEN` secret configured in GitHub repository settings
