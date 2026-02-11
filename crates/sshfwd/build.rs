@@ -14,14 +14,7 @@ const PLATFORMS: &[(&str, &str, &str)] = &[
 fn main() {
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
-
-    // Try local prebuilt-agents first (for published crate), then fall back to workspace root
     let prebuilt_dir = manifest_dir.join("prebuilt-agents");
-    let prebuilt_dir = if prebuilt_dir.exists() {
-        prebuilt_dir
-    } else {
-        manifest_dir.join("../../prebuilt-agents")
-    };
 
     let mut code = String::new();
     code.push_str("/// Returns the embedded agent binary for the given OS and architecture.\n");

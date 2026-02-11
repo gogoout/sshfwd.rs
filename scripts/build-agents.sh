@@ -6,7 +6,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-OUTPUT_DIR="$PROJECT_ROOT/prebuilt-agents"
+OUTPUT_DIR="$PROJECT_ROOT/crates/sshfwd/prebuilt-agents"
 
 # Platform matrix: directory-name rust-target
 PLATFORMS=(
