@@ -29,7 +29,7 @@ Enter
 Sleep 1s
 Type "q"
 Sleep 200ms
-Type "echo 'active port are persistented'"
+Type "echo 'active ports are persisted'"
 Sleep 300ms
 Enter
 Type "sshfwd devboxuk"
