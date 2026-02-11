@@ -13,6 +13,7 @@ A TUI-based SSH port forwarding management tool built with Rust. Inspired by [k9
 
 - **Automatic Port Detection** — Deploys a lightweight agent to the remote host that streams listening ports in real time
 - **One-Key Forwarding** — Press `Enter`/`f` to forward a port with matching local port, `F`/`Shift+Enter` for a custom local port
+- **Smart Port Lifecycle** — Automatically pauses forwards when remote port disappears (service stops) and reactivates when it returns (unlike VS Code which keeps stale forwards active)
 - **Error Recovery** — Bind failures open a modal dialog to pick a different port instead of silently falling back
 - **Forwarded Ports Grouped at Top** — Active forwards are visually separated from unforwarded ports
 - **Persistence** — Forwarded ports are remembered across sessions per destination (`~/.sshfwd/forwards.json`)
