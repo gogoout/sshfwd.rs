@@ -134,7 +134,16 @@ jobs:
           echo "=== Agent file sizes ==="
           du -h prebuilt-agents/*/sshfwd-agent
 
-      - name: Publish to crates.io
+      - name: Publish sshfwd-common to crates.io
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          cargo publish -p sshfwd-common --token $CARGO_REGISTRY_TOKEN
+
+      - name: Wait for crates.io index update
+        run: sleep 30
+
+      - name: Publish sshfwd to crates.io
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
