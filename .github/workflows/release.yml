@@ -141,6 +141,20 @@ jobs:
             fi
           done
 
+      - name: Validate version matches tag
+        run: |
+          TAG_VERSION="${GITHUB_REF#refs/tags/v}"
+          CARGO_VERSION=$(grep '^version = ' Cargo.toml | head -1 | cut -d'"' -f2)
+
+          if [ "$TAG_VERSION" != "$CARGO_VERSION" ]; then
+            echo "❌ Version mismatch!"
+            echo "   Git tag: v$TAG_VERSION"
+            echo "   Cargo.toml: $CARGO_VERSION"
+            exit 1
+          fi
+
+          echo "✓ Version $CARGO_VERSION matches tag v$TAG_VERSION"
+
       - name: Verify agent binaries before publishing
         run: |
           echo "=== Verifying all agent binaries are in place ==="
@@ -178,7 +192,20 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
-          cargo publish -p sshfwd-common --token $CARGO_REGISTRY_TOKEN
+          set +e
+          output=$(cargo publish -p sshfwd-common 2>&1)
+          exit_code=$?
+          set -e
+
+          if [ $exit_code -eq 0 ]; then
+            echo "✓ Successfully published sshfwd-common"
+          elif echo "$output" | grep -qi "already uploaded\|already exists"; then
+            echo "⚠ sshfwd-common already published, skipping..."
+          else
+            echo "✗ Failed to publish sshfwd-common:"
+            echo "$output"
+            exit $exit_code
+          fi
 
       - name: Wait for crates.io index update
         run: sleep 60
@@ -187,4 +214,17 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
-          cargo publish -p sshfwd --token $CARGO_REGISTRY_TOKEN
+          set +e
+          output=$(cargo publish -p sshfwd --allow-dirty 2>&1)
+          exit_code=$?
+          set -e
+
+          if [ $exit_code -eq 0 ]; then
+            echo "✓ Successfully published sshfwd"
+          elif echo "$output" | grep -qi "already uploaded\|already exists"; then
+            echo "⚠ sshfwd already published, skipping..."
+          else
+            echo "✗ Failed to publish sshfwd:"
+            echo "$output"
+            exit $exit_code
+          fi
