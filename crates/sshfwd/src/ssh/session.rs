@@ -1,10 +1,12 @@
 use std::future::Future;
+use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::Arc;
 
 use russh::client::{self, Msg};
 use russh::{ChannelMsg, ChannelStream};
 
+use super::config;
 use crate::error::SshError;
 
 /// Output from a remote command execution.
@@ -49,25 +51,16 @@ impl Session {
         destination: &str,
     ) -> Pin<Box<dyn Future<Output = Result<Self, SshError>> + Send + '_>> {
         Box::pin(async move {
-            let (explicit_user, host) = parse_destination(destination);
-
-            // Resolve SSH config for this host (falls back to defaults if no config)
-            let ssh_config = russh_config::parse_home(&host)
-                .unwrap_or_else(|_| russh_config::Config::default(&host));
-
-            // Our own SSH config parser handles tabs/= separators correctly
-            // (russh_config's parser only splits on spaces, silently dropping directives)
-            let host_cfg = parse_ssh_host_config(&host);
+            let (explicit_user, host) = config::parse_destination(destination);
+            let cfg = config::resolve_host_config(&host);
 
             let user = explicit_user
-                .or(host_cfg.user.clone())
-                .unwrap_or_else(|| ssh_config.user());
-            let resolved_host = host_cfg
-                .hostname
-                .unwrap_or_else(|| ssh_config.host().to_string());
-            let resolved_port = host_cfg.port.unwrap_or_else(|| ssh_config.port());
+                .or(cfg.user)
+                .unwrap_or_else(|| std::env::var("USER").unwrap_or_else(|_| "root".into()));
+            let resolved_host = cfg.hostname.unwrap_or_else(|| host.to_string());
+            let resolved_port = cfg.port.unwrap_or(22);
 
-            let (mut handle, jump_session) = if let Some(ref jump_dest) = host_cfg.proxy_jump {
+            let (mut handle, jump_session) = if let Some(ref jump_dest) = cfg.proxy_jump {
                 // ProxyJump: connect through the jump host, then tunnel
                 let jump = Session::connect(jump_dest).await?;
 
@@ -94,8 +87,7 @@ impl Session {
 
                 (handle, Some(Box::new(jump)))
             } else {
-                // Direct TCP connection (bypasses russh_config::stream() which has
-                // a bug formatting I/O errors as literal "0")
+                // Direct TCP connection
                 let addr = format!("{resolved_host}:{resolved_port}");
                 let stream = tokio::net::TcpStream::connect(&addr)
                     .await
@@ -113,12 +105,11 @@ impl Session {
             };
 
             // Authenticate
-            if !authenticate(&mut handle, &user, &host_cfg.identity_files).await? {
+            if !authenticate(&mut handle, &user, &cfg.identity_files).await? {
                 return Err(SshError::Auth {
                     destination: destination.to_string(),
                     message: format!(
-                        "all authentication methods failed (user={user}, host={resolved_host}, identity_files={:?})",
-                        host_cfg.identity_files
+                        "all authentication methods failed for {user}@{resolved_host}"
                     ),
                 });
             }
@@ -222,7 +213,7 @@ impl Session {
 async fn authenticate(
     handle: &mut client::Handle<ClientHandler>,
     user: &str,
-    identity_files: &[String],
+    identity_files: &[PathBuf],
 ) -> Result<bool, SshError> {
     let rsa_hash = handle
         .best_supported_rsa_hash()
@@ -247,8 +238,8 @@ async fn authenticate(
     }
 
     // 2. Try IdentityFile from SSH config
-    for path_str in identity_files {
-        if try_key_file(handle, user, rsa_hash, path_str).await? {
+    for path in identity_files {
+        if try_key_file(handle, user, rsa_hash, path).await? {
             return Ok(true);
         }
     }
@@ -256,13 +247,13 @@ async fn authenticate(
     // 3. Try default key files
     let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
     let default_keys = [
-        format!("{home}/.ssh/id_ed25519"),
-        format!("{home}/.ssh/id_rsa"),
-        format!("{home}/.ssh/id_ecdsa"),
+        PathBuf::from(format!("{home}/.ssh/id_ed25519")),
+        PathBuf::from(format!("{home}/.ssh/id_rsa")),
+        PathBuf::from(format!("{home}/.ssh/id_ecdsa")),
     ];
 
-    for path_str in &default_keys {
-        if try_key_file(handle, user, rsa_hash, path_str).await? {
+    for path in &default_keys {
+        if try_key_file(handle, user, rsa_hash, path).await? {
             return Ok(true);
         }
     }
@@ -274,9 +265,8 @@ async fn try_key_file(
     handle: &mut client::Handle<ClientHandler>,
     user: &str,
     rsa_hash: Option<russh::keys::HashAlg>,
-    path_str: &str,
+    path: &Path,
 ) -> Result<bool, SshError> {
-    let path = std::path::Path::new(path_str);
     if !path.exists() {
         return Ok(false);
     }
@@ -289,104 +279,4 @@ async fn try_key_file(
         Ok(res) if res.success() => Ok(true),
         _ => Ok(false),
     }
-}
-
-fn parse_destination(destination: &str) -> (Option<String>, String) {
-    if let Some((user, host)) = destination.split_once('@') {
-        (Some(user.to_string()), host.to_string())
-    } else {
-        (None, destination.to_string())
-    }
-}
-
-/// SSH config fields parsed from `~/.ssh/config`.
-///
-/// russh_config's parser only splits on spaces, silently dropping directives
-/// in tab-separated configs. We parse the fields we need ourselves, handling
-/// tabs, spaces, and `=` separators correctly.
-struct SshHostConfig {
-    hostname: Option<String>,
-    port: Option<u16>,
-    user: Option<String>,
-    proxy_jump: Option<String>,
-    identity_files: Vec<String>,
-}
-
-fn parse_ssh_host_config(host: &str) -> SshHostConfig {
-    let mut cfg = SshHostConfig {
-        hostname: None,
-        port: None,
-        user: None,
-        proxy_jump: None,
-        identity_files: Vec::new(),
-    };
-
-    let home = match std::env::var("HOME") {
-        Ok(h) => h,
-        Err(_) => return cfg,
-    };
-    let content = match std::fs::read_to_string(format!("{home}/.ssh/config")) {
-        Ok(c) => c,
-        Err(_) => return cfg,
-    };
-
-    let mut in_matching_block = false;
-    let mut seen_proxy_jump = false;
-
-    for line in content.lines() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() || trimmed.starts_with('#') {
-            continue;
-        }
-
-        let (key, value) = match trimmed.split_once(|c: char| c.is_whitespace() || c == '=') {
-            Some((k, v)) => (k.trim(), v.trim()),
-            None => continue,
-        };
-
-        if key.eq_ignore_ascii_case("Host") {
-            // Match all patterns in this Host line (supports globs like * and prefix*)
-            in_matching_block = value
-                .split_whitespace()
-                .any(|p| host_pattern_matches(p, host));
-        } else if key.eq_ignore_ascii_case("Match") {
-            in_matching_block = false;
-        } else if in_matching_block {
-            if key.eq_ignore_ascii_case("ProxyJump") && !seen_proxy_jump {
-                seen_proxy_jump = true;
-                if !value.eq_ignore_ascii_case("none") {
-                    cfg.proxy_jump = Some(value.to_string());
-                }
-            } else if key.eq_ignore_ascii_case("HostName") && cfg.hostname.is_none() {
-                cfg.hostname = Some(value.to_string());
-            } else if key.eq_ignore_ascii_case("User") && cfg.user.is_none() {
-                cfg.user = Some(value.to_string());
-            } else if key.eq_ignore_ascii_case("Port") && cfg.port.is_none() {
-                cfg.port = value.parse().ok();
-            } else if key.eq_ignore_ascii_case("IdentityFile") {
-                let path = if let Some(rest) = value.strip_prefix("~/") {
-                    format!("{home}/{rest}")
-                } else {
-                    value.to_string()
-                };
-                cfg.identity_files.push(path);
-            }
-        }
-    }
-
-    cfg
-}
-
-/// Basic SSH Host pattern matching (covers `*`, `prefix*`, `*suffix`).
-fn host_pattern_matches(pattern: &str, host: &str) -> bool {
-    if pattern == "*" {
-        return true;
-    }
-    if let Some(prefix) = pattern.strip_suffix('*') {
-        return host.starts_with(prefix);
-    }
-    if let Some(suffix) = pattern.strip_prefix('*') {
-        return host.ends_with(suffix);
-    }
-    pattern == host
 }

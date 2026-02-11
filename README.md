@@ -60,7 +60,7 @@ A TUI-based SSH port forwarding management tool built with Rust.
 
 3. **sshfwd** - Main application
    - SSH session lifecycle (`russh` — pure Rust, no child processes)
-   - Own SSH config parser (handles tabs/`=` separators that `russh_config` misses)
+   - SSH config resolution via `ssh2-config` (handles `Include`, globs, tabs/`=` separators)
    - ProxyJump support via recursive `channel_open_direct_tcpip` tunneling
    - Auth: ssh-agent → IdentityFile from config → default key paths
    - Multi-platform agent distribution: embeds binaries for Linux/macOS × x64/ARM64

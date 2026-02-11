@@ -8,7 +8,7 @@ build = "build.rs"
 sshfwd-common = { workspace = true }
 serde_json = { workspace = true }
 russh = { workspace = true }
-russh-config = { workspace = true }
+ssh2-config = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 sha2 = { workspace = true }
 thiserror = { workspace = true }
