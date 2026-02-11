@@ -1,3 +1,4 @@
-# Prebuilt agent binaries are not checked in.
-# Run scripts/build-agents.sh to generate them.
+# Prebuilt agent binaries are not checked into git.
+# Local dev: Run scripts/build-agents.sh to build them here.
+# CI/publish: Release workflow downloads built agents here before packaging.
 **/sshfwd-agent

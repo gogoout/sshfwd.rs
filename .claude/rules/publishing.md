@@ -10,7 +10,7 @@
 
 2. **Commit and tag:**
    ```bash
-   git add Cargo.toml
+   git add Cargo.toml Cargo.lock
    git commit -m "Bump version to X.Y.Z"
    git tag vX.Y.Z
    git push origin vX.Y.Z
@@ -25,8 +25,8 @@
 ## Requirements
 
 - `CARGO_REGISTRY_TOKEN` secret must be configured in GitHub repository settings
-- Agent binaries must exist in `crates/sshfwd/prebuilt-agents/` (committed to repo)
 - All CI checks must pass before tagging
+- Release workflow builds fresh agent binaries (not stored in git)
 
 ## Workflow File
 
