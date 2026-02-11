@@ -193,13 +193,13 @@ jobs:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
           set +e
-          output=$(cargo publish -p sshfwd-common 2>&1)
+          output=$(cargo publish -p sshfwd-common --locked 2>&1)
           exit_code=$?
           set -e
 
           if [ $exit_code -eq 0 ]; then
             echo "✓ Successfully published sshfwd-common"
-          elif echo "$output" | grep -qi "already uploaded\|already exists"; then
+          elif echo "$output" | grep -Eqi "already uploaded|already exists"; then
             echo "⚠ sshfwd-common already published, skipping..."
           else
             echo "✗ Failed to publish sshfwd-common:"
@@ -210,18 +210,33 @@ jobs:
       - name: Wait for crates.io index update
         run: sleep 60
 
+      - name: Verify only prebuilt-agents are uncommitted
+        run: |
+          # Check that only expected prebuilt-agents files are uncommitted
+          uncommitted=$(git status --porcelain | grep -v "^?? crates/sshfwd/prebuilt-agents/" || true)
+
+          if [ -n "$uncommitted" ]; then
+            echo "❌ Unexpected uncommitted changes detected:"
+            echo "$uncommitted"
+            echo ""
+            echo "Only prebuilt-agents should be uncommitted when using --allow-dirty"
+            exit 1
+          fi
+
+          echo "✓ Only prebuilt-agents are uncommitted (expected)"
+
       - name: Publish sshfwd to crates.io
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
           set +e
-          output=$(cargo publish -p sshfwd --allow-dirty 2>&1)
+          output=$(cargo publish -p sshfwd --allow-dirty --locked 2>&1)
           exit_code=$?
           set -e
 
           if [ $exit_code -eq 0 ]; then
             echo "✓ Successfully published sshfwd"
-          elif echo "$output" | grep -qi "already uploaded\|already exists"; then
+          elif echo "$output" | grep -Eqi "already uploaded|already exists"; then
             echo "⚠ sshfwd already published, skipping..."
           else
             echo "✗ Failed to publish sshfwd:"
