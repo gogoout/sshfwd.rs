@@ -126,6 +126,13 @@ jobs:
           name: agent-darwin-aarch64
           path: crates/sshfwd/prebuilt-agents/darwin-aarch64
 
+      - name: Make agent binaries executable
+        run: |
+          chmod +x crates/sshfwd/prebuilt-agents/linux-x86_64/sshfwd-agent
+          chmod +x crates/sshfwd/prebuilt-agents/linux-aarch64/sshfwd-agent
+          chmod +x crates/sshfwd/prebuilt-agents/darwin-x86_64/sshfwd-agent
+          chmod +x crates/sshfwd/prebuilt-agents/darwin-aarch64/sshfwd-agent
+
       - name: Verify agent binaries before publishing
         run: |
           echo "=== Verifying all agent binaries are in place ==="
