@@ -126,13 +126,38 @@ jobs:
           name: agent-darwin-aarch64
           path: crates/sshfwd/prebuilt-agents/darwin-aarch64
 
-      - name: Verify prebuilt agents
+      - name: Verify agent binaries before publishing
         run: |
-          echo "=== Prebuilt agents directory structure ==="
-          ls -lhR crates/sshfwd/prebuilt-agents/
+          echo "=== Verifying all agent binaries are in place ==="
+          AGENT_DIR="crates/sshfwd/prebuilt-agents"
+          REQUIRED_PLATFORMS=("linux-x86_64" "linux-aarch64" "darwin-x86_64" "darwin-aarch64")
+
+          all_present=true
+          for platform in "${REQUIRED_PLATFORMS[@]}"; do
+            binary="$AGENT_DIR/$platform/sshfwd-agent"
+
+            if [ ! -f "$binary" ]; then
+              echo "❌ MISSING: $binary"
+              all_present=false
+            elif [ ! -x "$binary" ]; then
+              echo "❌ NOT EXECUTABLE: $binary"
+              all_present=false
+            else
+              size=$(du -h "$binary" | awk '{print $1}')
+              echo "✓ $platform: $binary ($size)"
+            fi
+          done
+
+          if [ "$all_present" = false ]; then
+            echo ""
+            echo "ERROR: Not all agent binaries are present and executable!"
+            echo "Directory contents:"
+            ls -lhR "$AGENT_DIR"
+            exit 1
+          fi
+
           echo ""
-          echo "=== Agent file sizes ==="
-          du -h crates/sshfwd/prebuilt-agents/*/sshfwd-agent
+          echo "✓ All 4 agent binaries verified successfully"
 
       - name: Publish sshfwd-common to crates.io
         env:
