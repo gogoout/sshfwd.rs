@@ -3,6 +3,7 @@ mod discovery;
 pub mod embedded;
 mod error;
 mod event;
+mod forward;
 mod ssh;
 mod ui;
 
@@ -17,6 +18,8 @@ use ratatui::Terminal;
 
 use app::{Message, Model};
 use discovery::{DiscoveryEvent, DiscoveryStream};
+use forward::persistence;
+use forward::{ForwardEntry, ForwardManager, ForwardStatus};
 
 fn main() {
     // Single-threaded runtime: no worker pool, no work-stealing overhead.
@@ -54,7 +57,7 @@ fn main() {
     // Connect and start discovery before entering TUI
     eprintln!("Connecting to {destination}...");
 
-    let mut stream = runtime.block_on(async {
+    let (mut stream, session) = runtime.block_on(async {
         let session = match ssh::session::Session::connect(&destination).await {
             Ok(s) => s,
             Err(e) => {
@@ -65,13 +68,18 @@ fn main() {
 
         eprintln!("Connected. Deploying agent...");
 
-        match DiscoveryStream::start(session, agent_path.as_deref()).await {
+        // Clone session before discovery consumes it
+        let session_for_fwd = session.clone();
+
+        let stream = match DiscoveryStream::start(session, agent_path.as_deref()).await {
             Ok(s) => s,
             Err(e) => {
                 eprintln!("Discovery failed: {e}");
                 process::exit(1);
             }
-        }
+        };
+
+        (stream, session_for_fwd)
     });
 
     // Install panic hook that restores terminal
@@ -91,7 +99,20 @@ fn main() {
     let backend = CrosstermBackend::new(io::BufWriter::new(io::stdout()));
     let mut terminal = Terminal::new(backend).expect("failed to create terminal");
 
-    let mut model = Model::new(destination);
+    let mut model = Model::new(destination.clone());
+
+    // Load persisted forwards (all start as Paused — first scan triggers activation)
+    let persisted = persistence::load_forwards(&destination);
+    for pf in persisted {
+        model.forwards.insert(
+            pf.remote_port,
+            ForwardEntry {
+                local_port: pf.local_port,
+                status: ForwardStatus::Paused,
+                active_connections: 0,
+            },
+        );
+    }
 
     // Initial render
     terminal
@@ -104,30 +125,32 @@ fn main() {
     // bare read() avoids the use-dev-tty poll(ZERO) bug.
     let (kb_tx, kb_rx) = crossbeam_channel::bounded::<Message>(0);
 
-    std::thread::spawn(move || loop {
-        match crossterm::event::read() {
-            Ok(evt) => {
-                if let Some(msg) = event::crossterm_event_to_message(evt) {
-                    if kb_tx.send(msg).is_err() {
-                        break;
-                    }
+    std::thread::spawn(move || {
+        while let Ok(evt) = crossterm::event::read() {
+            if let Some(msg) = event::crossterm_event_to_message(evt) {
+                if kb_tx.send(msg).is_err() {
+                    break;
                 }
-            }
-            Err(_) => {
-                let _ = kb_tx.send(Message::Quit);
-                break;
             }
         }
     });
 
-    // Background channel — unbounded for infrequent discovery + tick events
+    // Background channel — unbounded for infrequent discovery + tick + forward events
     let (bg_tx, bg_rx) = crossbeam_channel::unbounded::<Message>();
 
-    // Discovery — dedicated OS thread owns the single-threaded tokio runtime.
-    // No multi-threaded worker pool running during the TUI phase.
+    // Forward command channel (sync → async)
+    let (fwd_cmd_tx, fwd_cmd_rx) = tokio::sync::mpsc::unbounded_channel();
+
+    // Discovery + ForwardManager — share a single-threaded tokio runtime on one OS thread
     let disc_tx = bg_tx.clone();
+    let fwd_event_tx = bg_tx.clone();
     std::thread::spawn(move || {
         runtime.block_on(async move {
+            // Spawn ForwardManager as a tokio task on this runtime
+            let fwd_manager = ForwardManager::new(session, fwd_cmd_rx, fwd_event_tx);
+            let fwd_handle = tokio::spawn(fwd_manager.run());
+
+            // Run discovery loop
             loop {
                 match stream.next_event().await {
                     Some(DiscoveryEvent::Scan(scan)) => {
@@ -150,6 +173,9 @@ fn main() {
                     }
                 }
             }
+
+            // Keep runtime alive for ForwardManager after discovery ends
+            let _ = fwd_handle.await;
         });
     });
 
@@ -171,13 +197,23 @@ fn main() {
         crossbeam_channel::select! {
             recv(kb_rx) -> msg => {
                 match msg {
-                    Ok(msg) => app::update(&mut model, msg),
+                    Ok(msg) => {
+                        let cmds = app::update(&mut model, msg);
+                        for cmd in cmds {
+                            let _ = fwd_cmd_tx.send(cmd);
+                        }
+                    }
                     Err(_) => break,
                 }
             }
             recv(bg_rx) -> msg => {
                 match msg {
-                    Ok(msg) => app::update(&mut model, msg),
+                    Ok(msg) => {
+                        let cmds = app::update(&mut model, msg);
+                        for cmd in cmds {
+                            let _ = fwd_cmd_tx.send(cmd);
+                        }
+                    }
                     Err(_) => break,
                 }
             }

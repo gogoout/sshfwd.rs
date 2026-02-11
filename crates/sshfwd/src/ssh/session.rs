@@ -121,6 +121,20 @@ impl Session {
         })
     }
 
+    /// Open a direct-tcpip channel for port forwarding.
+    pub async fn open_direct_tcpip(
+        &self,
+        host: &str,
+        port: u16,
+    ) -> Result<ChannelStream<Msg>, SshError> {
+        let channel = self
+            .handle
+            .channel_open_direct_tcpip(host.to_string(), port as u32, "127.0.0.1", 0)
+            .await
+            .map_err(SshError::Remote)?;
+        Ok(channel.into_stream())
+    }
+
     /// Execute a command and collect all output.
     pub async fn exec(&self, command: &str) -> Result<CommandOutput, SshError> {
         let mut channel = self
