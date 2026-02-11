@@ -13,6 +13,7 @@ A TUI-based SSH port forwarding management tool built with Rust. Inspired by [k9
 
 - **Automatic Port Detection** — Deploys a lightweight agent to the remote host that streams listening ports in real time
 - **One-Key Forwarding** — Press `Enter`/`f` to forward a port with matching local port, `F`/`Shift+Enter` for a custom local port
+- **Smart Port Lifecycle** — Automatically pauses forwards when remote port disappears (service stops) and reactivates when it returns (unlike VS Code which keeps stale forwards active)
 - **Error Recovery** — Bind failures open a modal dialog to pick a different port instead of silently falling back
 - **Forwarded Ports Grouped at Top** — Active forwards are visually separated from unforwarded ports
 - **Persistence** — Forwarded ports are remembered across sessions per destination (`~/.sshfwd/forwards.json`)
@@ -191,27 +192,6 @@ cargo test --workspace
 All checks run automatically in CI. Pull requests must pass before merging.
 
 See [CLAUDE.md](./CLAUDE.md) for development rules and workspace conventions.
-
-## Releases
-
-Publishing to crates.io is automated via GitHub Actions. To release a new version:
-
-1. **Update version** in root `Cargo.toml` (under `[workspace.package]`)
-2. **Commit and push** to main
-3. **Create a GitHub release** or push a version tag:
-   ```bash
-   git tag v0.1.1
-   git push origin v0.1.1
-   ```
-
-The release workflow automatically:
-- Builds agent binaries for all 4 platforms
-- Reconstructs the prebuilt-agents directory
-- Publishes to crates.io using `CARGO_REGISTRY_TOKEN` secret
-
-**First-time setup:** Add your crates.io API token to GitHub Secrets:
-1. Generate token at https://crates.io/settings/tokens
-2. Add as `CARGO_REGISTRY_TOKEN` in repository settings → Secrets → Actions
 
 ## License
 

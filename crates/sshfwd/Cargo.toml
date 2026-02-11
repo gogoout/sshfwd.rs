@@ -12,6 +12,12 @@ readme = "../../README.md"
 homepage = "https://github.com/gogoout/sshfwd.rs"
 documentation = "https://github.com/gogoout/sshfwd.rs#readme"
 build = "build.rs"
+include = [
+    "src/**/*",
+    "build.rs",
+    "prebuilt-agents/**/*",
+    "../../README.md",
+]
 
 [dependencies]
 sshfwd-common = { workspace = true }

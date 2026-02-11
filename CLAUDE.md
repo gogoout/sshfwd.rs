@@ -4,10 +4,9 @@ TUI-based SSH port forwarding tool using ratatui, inspired by k9s.
 
 ## Commands
 
-- `./scripts/build-agents.sh` — cross-compile agent binaries for all platforms
-- `cargo build -p sshfwd` — build main app (embeds prebuilt agents)
+- `./scripts/build-agents.sh` — cross-compile agents to `crates/sshfwd/prebuilt-agents/` (not committed to git)
 - `cargo run -p sshfwd -- user@hostname` — run with TUI
-- `cargo run -p sshfwd -- user@hostname --agent-path PATH` — dev override
+- `cargo run -p sshfwd -- user@hostname --agent-path PATH` — dev override for local agent
 
 ## Rules
 
@@ -16,6 +15,7 @@ TUI-based SSH port forwarding tool using ratatui, inspired by k9s.
 - [SSH Connection](/.claude/rules/ssh-connection.md) — russh, ssh2-config, ProxyJump, auth
 - [Agent & Platform](/.claude/rules/agent-platform.md) — adding platforms, cross-compilation, deployment
 - [Port Forwarding](/.claude/rules/port-forwarding.md) — ForwardManager, modal UI, persistence, display rows
+- [Publishing](/.claude/rules/publishing.md) — **NEVER `cargo publish` locally**, use GitHub Actions
 
 ## Verification
 
