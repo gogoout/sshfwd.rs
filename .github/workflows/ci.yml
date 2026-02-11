@@ -85,29 +85,42 @@ jobs:
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
+        if: matrix.target != 'aarch64-unknown-linux-musl'
 
-      - name: Install musl tools (Linux)
-        if: matrix.os == 'ubuntu-latest'
+      - name: Install musl tools (Linux x86_64)
+        if: matrix.target == 'x86_64-unknown-linux-musl'
         run: |
           sudo apt-get update
           sudo apt-get install -y musl-tools
 
       - name: Install target
+        if: matrix.target != 'aarch64-unknown-linux-musl'
         run: rustup target add ${{ matrix.target }}
 
       - name: Cache cargo registry
         uses: actions/cache@v4
+        if: matrix.target != 'aarch64-unknown-linux-musl'
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
           key: ${{ runner.os }}-${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Build agent
+      - name: Build agent (native)
+        if: matrix.target != 'aarch64-unknown-linux-musl'
         run: |
           cargo build -p sshfwd-agent \
             --target ${{ matrix.target }} \
             --profile release-agent
+
+      - name: Build agent (aarch64 via Docker)
+        if: matrix.target == 'aarch64-unknown-linux-musl'
+        run: |
+          docker run --rm -v "$(pwd)":/home/rust/src \
+            messense/rust-musl-cross:aarch64-musl \
+            cargo build -p sshfwd-agent \
+              --target aarch64-unknown-linux-musl \
+              --profile release-agent
 
       - name: Prepare artifact
         run: |
