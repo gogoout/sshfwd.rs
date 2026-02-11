@@ -5,11 +5,20 @@ pub enum SshError {
     #[error("failed to connect to {destination}: {source}")]
     Connection {
         destination: String,
-        source: openssh::Error,
+        source: russh::Error,
     },
 
+    #[error("authentication failed for {destination}: {message}")]
+    Auth {
+        destination: String,
+        message: String,
+    },
+
+    #[error("SSH config error: {0}")]
+    Config(String),
+
     #[error("remote command failed: {0}")]
-    Remote(openssh::Error),
+    Remote(russh::Error),
 
     #[error("agent deployment failed: {0}")]
     AgentDeploy(String),
@@ -31,10 +40,4 @@ pub enum DiscoveryError {
 
     #[error("failed to parse agent response: {0}")]
     Parse(String),
-
-    #[error("agent timeout: no response after {consecutive} consecutive timeouts ({timeout_secs}s each)")]
-    Timeout {
-        timeout_secs: u64,
-        consecutive: usize,
-    },
 }

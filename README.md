@@ -34,7 +34,7 @@ A TUI-based SSH port forwarding management tool built with Rust.
 
 - **UI Framework**: [ratatui](https://github.com/ratatui-org/ratatui) - Terminal user interface library
 - **Event Loop**: [crossbeam-channel](https://github.com/crossbeam-rs/crossbeam) - dua-cli-inspired synchronous event loop with bare `crossterm::event::read()`
-- **SSH**: [openssh](https://crates.io/crates/openssh) - Wrapper around system OpenSSH
+- **SSH**: [russh](https://crates.io/crates/russh) - Pure Rust SSH client (no system OpenSSH dependency)
 - **Async Runtime**: [tokio](https://tokio.rs/) - Async I/O for SSH and discovery
 - **Language**: Rust
 - **Inspiration**: k9s keyboard layout, dua-cli event loop
@@ -59,7 +59,10 @@ A TUI-based SSH port forwarding management tool built with Rust.
    - Compiled with musl for static linking (no libc dependency on remote)
 
 3. **sshfwd** - Main application
-   - SSH session lifecycle (`openssh::Session`)
+   - SSH session lifecycle (`russh` — pure Rust, no child processes)
+   - SSH config resolution via `ssh2-config` (handles `Include`, globs, tabs/`=` separators)
+   - ProxyJump support via recursive `channel_open_direct_tcpip` tunneling
+   - Auth: ssh-agent → IdentityFile from config → default key paths
    - Multi-platform agent distribution: embeds binaries for Linux/macOS × x64/ARM64
    - Runtime platform detection: detects remote OS + architecture via `uname -sm`
    - Agent deployment: hash verification, atomic upload, stale process cleanup
@@ -105,7 +108,6 @@ A TUI-based SSH port forwarding management tool built with Rust.
 ### Prerequisites
 
 - **Rust toolchain** (1.82.0 or later)
-- **SSH client** (OpenSSH or compatible)
 - **For building Linux agents on macOS**: `musl-cross` toolchain
   ```bash
   brew install filosottile/musl-cross/musl-cross
@@ -213,7 +215,7 @@ Latest test (2024-02-08) against Linux x86_64 server:
 ## Roadmap
 
 **Phase 1: Core Infrastructure** ✅ Complete
-- [x] SSH connection management (via `openssh` crate)
+- [x] SSH connection management (pure Rust via `russh`)
 - [x] Port detection on Linux servers (`/proc/net/tcp` parsing)
 - [x] Cross-platform agent binary distribution (Linux/macOS × x64/ARM64)
 - [x] Runtime platform detection and automatic binary selection
