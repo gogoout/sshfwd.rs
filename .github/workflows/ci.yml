@@ -1,0 +1,186 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  # Fast quality checks
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+  # Unit tests (don't require prebuilt agents)
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-test-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Run tests
+        run: cargo test --workspace --all-features
+
+  # Build agent binaries for all platforms
+  build-agents:
+    runs-on: ${{ matrix.os }}
+    needs: [check]
+    strategy:
+      matrix:
+        include:
+          # Linux builds
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            platform: linux-x86_64
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-musl
+            platform: linux-aarch64
+
+          # macOS builds (cross-compile both on aarch64 runner)
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            platform: darwin-x86_64
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            platform: darwin-aarch64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install musl tools (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
+
+      - name: Install target
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build agent
+        run: |
+          cargo build -p sshfwd-agent \
+            --target ${{ matrix.target }} \
+            --profile release-agent
+
+      - name: Prepare artifact
+        run: |
+          mkdir -p prebuilt-agents/${{ matrix.platform }}
+          cp target/${{ matrix.target }}/release-agent/sshfwd-agent \
+             prebuilt-agents/${{ matrix.platform }}/sshfwd-agent
+          chmod +x prebuilt-agents/${{ matrix.platform }}/sshfwd-agent
+
+      - name: Upload agent artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-${{ matrix.platform }}
+          path: prebuilt-agents/${{ matrix.platform }}/sshfwd-agent
+          retention-days: 1
+
+  # Build main application with embedded agents
+  build-main:
+    runs-on: ubuntu-latest
+    needs: [build-agents, test]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      # Download all agent artifacts and reconstruct prebuilt-agents/ directory
+      - name: Download Linux x86_64 agent
+        uses: actions/download-artifact@v4
+        with:
+          name: agent-linux-x86_64
+          path: prebuilt-agents/linux-x86_64
+
+      - name: Download Linux aarch64 agent
+        uses: actions/download-artifact@v4
+        with:
+          name: agent-linux-aarch64
+          path: prebuilt-agents/linux-aarch64
+
+      - name: Download macOS x86_64 agent
+        uses: actions/download-artifact@v4
+        with:
+          name: agent-darwin-x86_64
+          path: prebuilt-agents/darwin-x86_64
+
+      - name: Download macOS aarch64 agent
+        uses: actions/download-artifact@v4
+        with:
+          name: agent-darwin-aarch64
+          path: prebuilt-agents/darwin-aarch64
+
+      - name: Verify prebuilt agents
+        run: |
+          echo "=== Prebuilt agents directory structure ==="
+          ls -lhR prebuilt-agents/
+          echo ""
+          echo "=== Agent file sizes ==="
+          du -h prebuilt-agents/*/sshfwd-agent
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-build-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build main application
+        run: cargo build -p sshfwd --release
+
+      - name: Upload sshfwd binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: sshfwd-linux-x86_64
+          path: target/release/sshfwd
+          retention-days: 7
