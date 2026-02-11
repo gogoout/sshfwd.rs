@@ -101,38 +101,38 @@ jobs:
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
 
-      # Download all agent artifacts and reconstruct prebuilt-agents/ directory
+      # Download all agent artifacts into crates/sshfwd/prebuilt-agents/
       - name: Download Linux x86_64 agent
         uses: actions/download-artifact@v4
         with:
           name: agent-linux-x86_64
-          path: prebuilt-agents/linux-x86_64
+          path: crates/sshfwd/prebuilt-agents/linux-x86_64
 
       - name: Download Linux aarch64 agent
         uses: actions/download-artifact@v4
         with:
           name: agent-linux-aarch64
-          path: prebuilt-agents/linux-aarch64
+          path: crates/sshfwd/prebuilt-agents/linux-aarch64
 
       - name: Download macOS x86_64 agent
         uses: actions/download-artifact@v4
         with:
           name: agent-darwin-x86_64
-          path: prebuilt-agents/darwin-x86_64
+          path: crates/sshfwd/prebuilt-agents/darwin-x86_64
 
       - name: Download macOS aarch64 agent
         uses: actions/download-artifact@v4
         with:
           name: agent-darwin-aarch64
-          path: prebuilt-agents/darwin-aarch64
+          path: crates/sshfwd/prebuilt-agents/darwin-aarch64
 
       - name: Verify prebuilt agents
         run: |
           echo "=== Prebuilt agents directory structure ==="
-          ls -lhR prebuilt-agents/
+          ls -lhR crates/sshfwd/prebuilt-agents/
           echo ""
           echo "=== Agent file sizes ==="
-          du -h prebuilt-agents/*/sshfwd-agent
+          du -h crates/sshfwd/prebuilt-agents/*/sshfwd-agent
 
       - name: Publish sshfwd-common to crates.io
         env:
