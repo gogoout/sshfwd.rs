@@ -3,10 +3,10 @@
 ## Elm Architecture (TEA)
 
 All TUI state flows through `crates/sshfwd/src/app.rs`:
-- **Model**: single state struct (ports, connection state, selection)
-- **Message**: enum of all events (scan data, keyboard, tick)
-- **update()**: pure state transitions, sets `needs_render` flag
-- **view()**: delegates to `ui/` module
+- **Model**: single state struct (ports, forwards, connection state, modal, selection)
+- **Message**: enum of all events (scan data, key press, forward events, tick)
+- **update()**: pure state transitions, sets `needs_render` flag, returns `ForwardCommand`s
+- **view()**: renders table + hotkey bar, then modal overlay if `ModalState != None`
 
 ## Event loop (dua-cli pattern)
 
@@ -18,7 +18,9 @@ All TUI state flows through `crates/sshfwd/src/app.rs`:
 
 ## Key patterns
 
-- Port rows sorted by port → PID → protocol to prevent flicker between scans
+- Display rows: forwarded ports grouped at top, separator, then non-forwarded (via `build_display_rows()`)
+- `selected_index` is a visual index into display rows; navigation skips separator
+- `adjust_selection()` preserves selected port across display-row reorderings
 - `needs_render` flag: skip draw calls when state hasn't visually changed
 
 ## Exit gotcha

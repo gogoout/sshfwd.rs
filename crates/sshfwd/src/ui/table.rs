@@ -1,11 +1,20 @@
-use ratatui::layout::{Constraint, Rect};
+use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
-use ratatui::widgets::{Block, BorderType, Row, Table, TableState};
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Block, BorderType, Paragraph, Row, Table, TableState};
 use ratatui::Frame;
 
-use crate::app::Model;
+use crate::app::{ConnectionState, Model};
 use crate::forward::ForwardStatus;
 use crate::ui::header;
+
+const LOGO: &[&str] = &[
+    r"              __    ____             __    ",
+    r"   __________/ /_  / __/      ______/ /    ",
+    r"  / ___/ ___/ __ \/ /_| | /| / / __  /    ",
+    r" (__  |__  ) / / / __/| |/ |/ / /_/ /     ",
+    r"/____/____/_/ /_/_/   |__/|__/\__,_/      ",
+];
 
 const HEADER_STYLE: Style = Style::new()
     .fg(Color::DarkGray)
@@ -51,6 +60,11 @@ pub fn render(model: &Model, frame: &mut Frame, area: Rect) {
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(Color::DarkGray))
         .title(title);
+
+    if model.ports.is_empty() || model.started_at.elapsed().as_secs() < 1 {
+        render_splash(model, frame, area, block);
+        return;
+    }
 
     let header_row = Row::new(["FWD", "PORT", "PROTO", "PID", "COMMAND"]).style(HEADER_STYLE);
 
@@ -105,6 +119,42 @@ pub fn render(model: &Model, frame: &mut Frame, area: Rect) {
     }
 
     frame.render_stateful_widget(table, area, &mut table_state);
+}
+
+fn render_splash(model: &Model, frame: &mut Frame, area: Rect, block: Block) {
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let logo_height = LOGO.len() as u16;
+    let status_line = match model.connection_state {
+        ConnectionState::Connecting => "Connecting...",
+        ConnectionState::Connected => "Waiting for ports...",
+        ConnectionState::Disconnected => "Disconnected",
+    };
+    // logo + blank + status = total content height
+    let content_height = logo_height + 2;
+
+    let vertical = Layout::vertical([
+        Constraint::Fill(1),
+        Constraint::Length(content_height),
+        Constraint::Fill(1),
+    ])
+    .split(inner);
+
+    let content_area = vertical[1];
+
+    let mut lines: Vec<Line> = LOGO
+        .iter()
+        .map(|line| Line::from(Span::styled(*line, Style::default().fg(Color::Cyan))))
+        .collect();
+    lines.push(Line::raw(""));
+    lines.push(Line::from(Span::styled(
+        status_line,
+        Style::default().fg(Color::DarkGray),
+    )));
+
+    let paragraph = Paragraph::new(lines).centered();
+    frame.render_widget(paragraph, content_area);
 }
 
 /// Returns (display_text, optional_style_override) for the FWD column.

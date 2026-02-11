@@ -57,6 +57,7 @@ pub struct Model {
     pub needs_render: bool,
     pub forwards: HashMap<u16, ForwardEntry>,
     pub modal: ModalState,
+    pub started_at: Instant,
 }
 
 impl Model {
@@ -74,6 +75,7 @@ impl Model {
             needs_render: true,
             forwards: HashMap::new(),
             modal: ModalState::None,
+            started_at: Instant::now(),
         }
     }
 
@@ -275,6 +277,10 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<ForwardCommand> {
             model.needs_render = true;
         }
         Message::Tick => {
+            // Re-render during splash so the transition to table happens on time
+            if model.started_at.elapsed().as_secs() < 2 {
+                model.needs_render = true;
+            }
             if let Some(last) = model.last_scan_at {
                 if last.elapsed().as_secs() >= STALENESS_THRESHOLD_SECS
                     && model.connection_state == ConnectionState::Connected
