@@ -1,7 +1,12 @@
 [package]
 name = "sshfwd-agent"
-version = "0.1.0"
-edition = "2021"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Remote agent binary for sshfwd (embedded in main app, not published)"
+publish = false
 
 [dependencies]
 sshfwd-common = { workspace = true }

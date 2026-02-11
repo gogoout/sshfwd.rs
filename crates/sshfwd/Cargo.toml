@@ -1,7 +1,16 @@
 [package]
 name = "sshfwd"
-version = "0.1.0"
-edition = "2021"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "TUI-based SSH port forwarding manager with automatic port discovery"
+keywords = ["ssh", "port-forwarding", "tui", "terminal"]
+categories = ["command-line-utilities", "network-programming"]
+readme = "../../README.md"
+homepage = "https://github.com/gogoout/sshfwd.rs"
+documentation = "https://github.com/gogoout/sshfwd.rs#readme"
 build = "build.rs"
 
 [dependencies]

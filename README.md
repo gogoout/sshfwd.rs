@@ -1,5 +1,3 @@
-# sshfwd.rs
-
 ```
               __    ____             __
    __________/ /_  / __/      ______/ /
@@ -7,6 +5,7 @@
  (__  |__  ) / / / __/| |/ |/ / /_/ /
 /____/____/_/ /_/_/   |__/|__/\__,_/
 ```
+# sshfwd.rs
 
 A TUI-based SSH port forwarding management tool built with Rust. Inspired by [k9s](https://github.com/derailed/k9s)' keyboard-driven interface.
 
@@ -33,29 +32,48 @@ A TUI-based SSH port forwarding management tool built with Rust. Inspired by [k9
 
 ## Installation
 
-### Prerequisites
+### Quick Install
 
-- **Rust toolchain** (1.82.0 or later)
-- **For building Linux agents on macOS**: `musl-cross` toolchain
-  ```bash
-  brew install filosottile/musl-cross/musl-cross
-  ```
+Install directly via cargo:
+
+```bash
+cargo install sshfwd
+```
+
+The published crate includes prebuilt agent binaries for all supported platforms (Linux x86_64/ARM64, macOS Intel/ARM64). The agent is automatically deployed to remote servers when you connect.
+
+### Platform Support
+
+**Remote servers (agent):**
+- Linux x86_64 / ARM64 (aarch64) — statically linked via musl
+- macOS (Apple Silicon & Intel) — native binaries
+
+**Local machine (main app):**
+- macOS (Apple Silicon & Intel)
+- Linux (x86_64 / ARM64)
+- Windows via WSL (experimental)
 
 ### Build from Source
 
+For development or unsupported platforms:
+
+**Prerequisites:**
+- Rust 1.82.0 or later
+- For Linux agent cross-compilation on macOS: `brew install filosottile/musl-cross/musl-cross`
+
+**Build:**
 ```bash
 git clone https://github.com/gogoout/sshfwd.rs.git
 cd sshfwd.rs
 
-# Build agent binaries for all platforms
+# Cross-compile agents for all platforms
 ./scripts/build-agents.sh
 
-# Build the main application (embeds agents into binary)
-cargo build --release -p sshfwd
-
-# Or install directly
+# Build and install the main application
 cargo install --path crates/sshfwd
 ```
+
+For development, use `cargo build --release -p sshfwd` to build without installing.
 
 ## Usage
 
@@ -70,13 +88,13 @@ sshfwd user@hostname --agent-path ./target/debug/sshfwd-agent
 ### TUI
 
 ```
-╭ ● user@host │ 5 ports │ 2 fwd ─────────────────────╮
-│ FWD       PORT    PROTO   PID      COMMAND           │
-│▶->:5432  5432    tcp     1234     postgresql/15/...  │
-│ ->:8080  8080    tcp6    5678     node server.js     │
-│ ──────── ──────── ─────── ──────── ──────────────── │
-│ 3000     tcp     9012     ruby bin/rails s           │
-│ 6379     tcp     3456     redis-server *:6379        │
+╭ ● user@host │ 5 ports │ 2 fwd ──────────────────────╮
+│ FWD       PORT    PROTO   PID      COMMAND          │
+│▶->:5432  5432    tcp     1234     postgresql/15/... │
+│ ->:8080  8080    tcp6    5678     node server.js    │
+│ ──────── ──────── ─────── ──────── ─────────────────│
+│          3000    tcp     9012     ruby bin/rails s  │
+│          6379    tcp     3456     redis-server      │
 ╰─────────────────────────────────────────────────────╯
  <j/k>Navigate <g/G>Top/Bottom <Enter/f>Forward <F>Custom Port <q>Quit
 ```
@@ -88,7 +106,7 @@ Forwarded ports are grouped at the top with a visual separator.
 When pressing `F`/`Shift+Enter`, or when a bind error occurs:
 
 ```
-╭─ Forward port 5432 ──────────╮
+╭─ Forward port 5432 ───────────╮
 │                               │
 │  Address already in use       │
 │  Local port: 5432█            │
@@ -137,13 +155,13 @@ Event loop uses the [dua-cli pattern](https://github.com/Byron/dua-cli): bare `c
 ### Data Flow
 
 ```
-┌─ Main App ─────────┐                    ┌──── Remote Server ────┐
+┌─ Main App ──────────┐                    ┌──── Remote Server ────┐
 │                     │                    │                       │
 │ 1. Connect (SSH)    │───── russh ────────│ 2. Upload Agent       │
-│ 3. Deploy Agent     │──── exec ch ──────│ 4. Run Agent Loop     │
-│ 5. Parse JSON       │◄── stdout pipe ───│    (scan every 2s)    │
+│ 3. Deploy Agent     │──── exec ch ───────│ 4. Run Agent Loop     │
+│ 5. Parse JSON       │◄── stdout pipe ────│    (scan every 2s)    │
 │ 6. Display TUI      │                    │                       │
-│ 7. Forward Ports    │── direct-tcpip ───│ 8. Tunnel Traffic     │
+│ 7. Forward Ports    │── direct-tcpip ────│ 8. Tunnel Traffic     │
 │                     │                    │                       │
 └─────────────────────┘                    └───────────────────────┘
 ```
@@ -170,11 +188,40 @@ cargo clippy --all-targets --all-features
 cargo test --workspace
 ```
 
+All checks run automatically in CI. Pull requests must pass before merging.
+
 See [CLAUDE.md](./CLAUDE.md) for development rules and workspace conventions.
+
+## Releases
+
+Publishing to crates.io is automated via GitHub Actions. To release a new version:
+
+1. **Update version** in root `Cargo.toml` (under `[workspace.package]`)
+2. **Commit and push** to main
+3. **Create a GitHub release** or push a version tag:
+   ```bash
+   git tag v0.1.1
+   git push origin v0.1.1
+   ```
+
+The release workflow automatically:
+- Builds agent binaries for all 4 platforms
+- Reconstructs the prebuilt-agents directory
+- Publishes to crates.io using `CARGO_REGISTRY_TOKEN` secret
+
+**First-time setup:** Add your crates.io API token to GitHub Secrets:
+1. Generate token at https://crates.io/settings/tokens
+2. Add as `CARGO_REGISTRY_TOKEN` in repository settings → Secrets → Actions
 
 ## License
 
-_(TODO: Add license information)_
+Licensed under the [MIT license](LICENSE-MIT).
+
+### Contribution
+
+Unless you explicitly state otherwise, any contribution intentionally submitted
+for inclusion in the work by you shall be licensed as above, without any
+additional terms or conditions.
 
 ## Acknowledgments
 
