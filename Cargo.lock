@@ -2477,6 +2477,7 @@ dependencies = [
  "crossterm",
  "ratatui",
  "russh",
+ "serde",
  "serde_json",
  "sha2 0.10.9",
  "ssh2-config",

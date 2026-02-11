@@ -1,5 +1,6 @@
 pub mod header;
 pub mod hotkey_bar;
+pub mod modal;
 pub mod table;
 
 use ratatui::layout::{Constraint, Layout, Rect};

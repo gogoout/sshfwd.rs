@@ -2,9 +2,9 @@ use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 
 use crate::app::{ConnectionState, Model};
+use crate::forward::ForwardStatus;
 use crate::ui::{CONNECTED_CHAR, CONNECTING_CHAR, DISCONNECT_CHAR};
 
-/// Builds the title Line used in the table block border.
 pub fn build_title(model: &Model) -> Line<'_> {
     let (indicator, indicator_style) = match model.connection_state {
         ConnectionState::Connecting => (CONNECTING_CHAR, Style::default().fg(Color::Yellow)),
@@ -18,8 +18,13 @@ pub fn build_title(model: &Model) -> Line<'_> {
     };
 
     let port_count = model.ports.len();
+    let fwd_count = model
+        .forwards
+        .values()
+        .filter(|e| matches!(e.status, ForwardStatus::Active))
+        .count();
 
-    let spans = vec![
+    let mut spans = vec![
         Span::raw(" "),
         Span::styled(indicator.to_string(), indicator_style),
         Span::raw(" "),
@@ -29,6 +34,13 @@ pub fn build_title(model: &Model) -> Line<'_> {
             Style::default().fg(Color::DarkGray),
         ),
     ];
+
+    if fwd_count > 0 {
+        spans.push(Span::styled(
+            format!("│ {} fwd ", fwd_count),
+            Style::default().fg(Color::Green),
+        ));
+    }
 
     Line::from(spans)
 }
