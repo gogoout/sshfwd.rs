@@ -1,11 +1,12 @@
 use std::borrow::Cow;
 use std::path::Path;
 
-use openssh::{Child, Session, Stdio};
+use russh::client::Msg;
+use russh::ChannelStream;
 use sha2::{Digest, Sha256};
-use tokio::io::AsyncWriteExt;
 
 use crate::error::SshError;
+use crate::ssh::session::Session;
 
 const REMOTE_AGENT_DIR: &str = ".sshfwd";
 const REMOTE_AGENT_NAME: &str = "sshfwd-agent";
@@ -32,17 +33,17 @@ impl Platform {
 }
 
 /// Manages the remote agent binary lifecycle.
-pub struct AgentManager<'s> {
-    session: &'s Session,
+pub struct AgentManager {
+    session: Session,
 }
 
-impl<'s> AgentManager<'s> {
-    pub fn new(session: &'s Session) -> Self {
+impl AgentManager {
+    pub fn new(session: Session) -> Self {
         Self { session }
     }
 
     /// Ensure the agent binary is up-to-date on the remote host, then spawn it.
-    /// Returns the running child process with stdout piped for reading.
+    /// Returns a `ChannelStream` for reading the agent's stdout.
     ///
     /// If `local_agent_path` is provided, reads the binary from that file (development override).
     /// Otherwise, uses the embedded binary for the detected platform, falling back to
@@ -50,7 +51,7 @@ impl<'s> AgentManager<'s> {
     pub async fn deploy_and_spawn(
         &self,
         local_agent_path: Option<&Path>,
-    ) -> Result<Child<&'s Session>, SshError> {
+    ) -> Result<ChannelStream<Msg>, SshError> {
         let platform = self.detect_platform().await?;
         let agent_bytes = self
             .resolve_agent_binary(&platform, local_agent_path)
@@ -127,13 +128,7 @@ impl<'s> AgentManager<'s> {
 
     /// Detect the remote system OS and architecture via `uname -s` and `uname -m`.
     pub async fn detect_platform(&self) -> Result<Platform, SshError> {
-        let output = self
-            .session
-            .command("uname")
-            .arg("-sm")
-            .output()
-            .await
-            .map_err(SshError::Remote)?;
+        let output = self.session.exec("uname -sm").await?;
 
         let raw = String::from_utf8_lossy(&output.stdout).trim().to_string();
 
@@ -154,18 +149,12 @@ impl<'s> AgentManager<'s> {
     /// Get SHA256 hash of the remote agent binary.
     async fn remote_hash(&self, remote_path: &str) -> Result<String, SshError> {
         // Try sha256sum first (Linux), fall back to openssl (macOS)
-        let output = self
-            .session
-            .command("sh")
-            .arg("-c")
-            .arg(format!(
-                "sha256sum '{remote_path}' 2>/dev/null || openssl dgst -sha256 '{remote_path}' 2>/dev/null"
-            ))
-            .output()
-            .await
-            .map_err(SshError::Remote)?;
+        let cmd = format!(
+            "sha256sum '{remote_path}' 2>/dev/null || openssl dgst -sha256 '{remote_path}' 2>/dev/null"
+        );
+        let output = self.session.exec(&cmd).await?;
 
-        if !output.status.success() {
+        if !output.success {
             return Err(SshError::AgentDeploy(format!(
                 "remote agent not found at {remote_path}"
             )));
@@ -193,56 +182,25 @@ impl<'s> AgentManager<'s> {
     ) -> Result<(), SshError> {
         // Ensure directory exists
         self.session
-            .command("mkdir")
-            .arg("-p")
-            .arg(remote_dir)
-            .output()
-            .await
-            .map_err(SshError::Remote)?;
+            .exec(&format!("mkdir -p '{remote_dir}'"))
+            .await?;
 
         let tmp_path = format!("{remote_path}.tmp");
 
         // Upload via stdin pipe to temp file
-        let mut child = self
-            .session
-            .command("sh")
-            .arg("-c")
-            .arg(format!("cat > '{tmp_path}'"))
-            .stdin(Stdio::piped())
-            .spawn()
-            .await
-            .map_err(SshError::Remote)?;
-
-        let stdin = child
-            .stdin()
-            .take()
-            .ok_or_else(|| SshError::AgentDeploy("failed to get stdin for upload".to_string()))?;
-
-        let mut stdin = stdin;
-        stdin
-            .write_all(bytes)
-            .await
-            .map_err(|e| SshError::AgentDeploy(format!("failed to write agent binary: {e}")))?;
-        stdin
-            .shutdown()
-            .await
-            .map_err(|e| SshError::AgentDeploy(format!("failed to close stdin: {e}")))?;
-        drop(stdin);
-
-        child.wait().await.map_err(SshError::Remote)?;
+        self.session
+            .exec_with_stdin(&format!("cat > '{tmp_path}'"), bytes)
+            .await?;
 
         // Atomic mv + chmod
-        let mv_cmd = format!("mv '{tmp_path}' '{remote_path}' && chmod +x '{remote_path}'");
         let output = self
             .session
-            .command("sh")
-            .arg("-c")
-            .arg(&mv_cmd)
-            .output()
-            .await
-            .map_err(SshError::Remote)?;
+            .exec(&format!(
+                "mv '{tmp_path}' '{remote_path}' && chmod +x '{remote_path}'"
+            ))
+            .await?;
 
-        if !output.status.success() {
+        if !output.success {
             return Err(SshError::AgentDeploy(format!(
                 "failed to install agent: {}",
                 String::from_utf8_lossy(&output.stderr)
@@ -255,14 +213,8 @@ impl<'s> AgentManager<'s> {
     /// Kill any stale agent process from a previous session.
     async fn kill_stale_agent(&self) {
         // Read PID file
-        let output = match self
-            .session
-            .command("cat")
-            .arg(REMOTE_PID_FILE)
-            .output()
-            .await
-        {
-            Ok(o) if o.status.success() => o,
+        let output = match self.session.exec(&format!("cat {REMOTE_PID_FILE}")).await {
+            Ok(o) if o.success => o,
             _ => return,
         };
 
@@ -275,41 +227,20 @@ impl<'s> AgentManager<'s> {
         // Verify the PID is actually our agent (prevent killing unrelated process)
         let verify_cmd =
             format!("cat /proc/{pid}/comm 2>/dev/null || ps -p {pid} -o comm= 2>/dev/null");
-        let output = match self
-            .session
-            .command("sh")
-            .arg("-c")
-            .arg(&verify_cmd)
-            .output()
-            .await
-        {
+        let output = match self.session.exec(&verify_cmd).await {
             Ok(o) => o,
             Err(_) => return,
         };
 
         let comm = String::from_utf8_lossy(&output.stdout).trim().to_string();
         if comm == REMOTE_AGENT_NAME {
-            let _ = self
-                .session
-                .command("kill")
-                .arg(pid_str.as_str())
-                .output()
-                .await;
+            let _ = self.session.exec(&format!("kill {pid_str}")).await;
         }
     }
 
     /// Spawn the remote agent as a persistent process.
-    async fn spawn_agent(&self, remote_path: &str) -> Result<Child<&'s Session>, SshError> {
-        let child = self
-            .session
-            .command(remote_path)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()
-            .await
-            .map_err(SshError::Remote)?;
-
-        Ok(child)
+    async fn spawn_agent(&self, remote_path: &str) -> Result<ChannelStream<Msg>, SshError> {
+        self.session.exec_streaming(remote_path).await
     }
 
     /// Kill the remote agent gracefully (for shutdown).

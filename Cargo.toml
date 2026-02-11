@@ -15,7 +15,8 @@ serde_json = "1"
 libc = "0.2"
 
 # SSH and async
-openssh = "0.10"
+russh = "0.57"
+russh-config = "0.57"
 tokio = "1"
 futures = "0.3"
 

@@ -18,8 +18,14 @@ use ratatui::Terminal;
 use app::{Message, Model};
 use discovery::{DiscoveryEvent, DiscoveryStream};
 
-#[tokio::main]
-async fn main() {
+fn main() {
+    // Single-threaded runtime: no worker pool, no work-stealing overhead.
+    // Moves to a dedicated OS thread for discovery I/O after setup.
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("failed to create tokio runtime");
+
     let args: Vec<String> = std::env::args().collect();
 
     if args.len() < 2 {
@@ -48,28 +54,25 @@ async fn main() {
     // Connect and start discovery before entering TUI
     eprintln!("Connecting to {destination}...");
 
-    let session = match ssh::session::connect(&destination).await {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("Connection failed: {e}");
-            process::exit(1);
+    let mut stream = runtime.block_on(async {
+        let session = match ssh::session::Session::connect(&destination).await {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("Connection failed: {e}");
+                process::exit(1);
+            }
+        };
+
+        eprintln!("Connected. Deploying agent...");
+
+        match DiscoveryStream::start(session, agent_path.as_deref()).await {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("Discovery failed: {e}");
+                process::exit(1);
+            }
         }
-    };
-
-    // Leak session to get 'static lifetime. Safe because:
-    // - process::exit(0) skips all destructors anyway (tui-architecture.md)
-    // - Session's drop blocks on SSH master process, which we want to avoid
-    let session: &'static openssh::Session = Box::leak(Box::new(session));
-
-    eprintln!("Connected. Deploying agent...");
-
-    let mut stream = match DiscoveryStream::start(session, agent_path.as_deref()).await {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("Discovery failed: {e}");
-            process::exit(1);
-        }
-    };
+    });
 
     // Install panic hook that restores terminal
     let original_hook = std::panic::take_hook();
@@ -120,49 +123,50 @@ async fn main() {
     // Background channel — unbounded for infrequent discovery + tick events
     let (bg_tx, bg_rx) = crossbeam_channel::unbounded::<Message>();
 
-    // Discovery task
+    // Discovery — dedicated OS thread owns the single-threaded tokio runtime.
+    // No multi-threaded worker pool running during the TUI phase.
     let disc_tx = bg_tx.clone();
-    tokio::spawn(async move {
-        loop {
-            match stream.next_event().await {
-                Some(DiscoveryEvent::Scan(scan)) => {
-                    if disc_tx.send(Message::ScanReceived(scan)).is_err() {
+    std::thread::spawn(move || {
+        runtime.block_on(async move {
+            loop {
+                match stream.next_event().await {
+                    Some(DiscoveryEvent::Scan(scan)) => {
+                        if disc_tx.send(Message::ScanReceived(scan)).is_err() {
+                            break;
+                        }
+                    }
+                    Some(DiscoveryEvent::Warning(msg)) => {
+                        if disc_tx.send(Message::DiscoveryWarning(msg)).is_err() {
+                            break;
+                        }
+                    }
+                    Some(DiscoveryEvent::Error(e)) => {
+                        let _ = disc_tx.send(Message::DiscoveryError(e));
                         break;
                     }
-                }
-                Some(DiscoveryEvent::Warning(msg)) => {
-                    if disc_tx.send(Message::DiscoveryWarning(msg)).is_err() {
+                    None => {
+                        let _ = disc_tx.send(Message::StreamEnded);
                         break;
                     }
-                }
-                Some(DiscoveryEvent::Error(e)) => {
-                    let _ = disc_tx.send(Message::DiscoveryError(e));
-                    break;
-                }
-                None => {
-                    let _ = disc_tx.send(Message::StreamEnded);
-                    break;
                 }
             }
-        }
+        });
     });
 
-    // Tick task
+    // Tick thread — plain OS thread, no async needed
     let tick_tx = bg_tx.clone();
-    tokio::spawn(async move {
-        let mut interval = tokio::time::interval(std::time::Duration::from_secs(1));
-        loop {
-            interval.tick().await;
-            if tick_tx.send(Message::Tick).is_err() {
-                break;
-            }
+    std::thread::spawn(move || loop {
+        std::thread::sleep(std::time::Duration::from_secs(1));
+        if tick_tx.send(Message::Tick).is_err() {
+            break;
         }
     });
 
     // Drop original sender so bg channel closes when all tasks finish
     drop(bg_tx);
 
-    // Main loop: crossbeam::select! multiplexes keyboard + background channels
+    // Main loop on the main OS thread — completely independent of tokio.
+    // crossbeam::select! multiplexes keyboard + background channels.
     while model.running {
         crossbeam_channel::select! {
             recv(kb_rx) -> msg => {
@@ -188,8 +192,7 @@ async fn main() {
     }
 
     // Restore terminal and exit immediately. Dropping crossterm's
-    // EventStream blocks on a pending stdin read, and openssh's Session
-    // destructor blocks on the SSH master process — so skip all
+    // read() thread has no clean cancellation — so skip all
     // destructors via process::exit().
     terminal::disable_raw_mode().ok();
     io::stdout().execute(LeaveAlternateScreen).ok();

@@ -25,5 +25,4 @@ All TUI state flows through `crates/sshfwd/src/app.rs`:
 
 `process::exit(0)` is called after terminal restore. Do NOT try graceful cleanup via destructors:
 - crossterm `read()` thread has no clean cancellation
-- openssh `Session` drop blocks on SSH master process
 - Remote agent is cleaned up via stale PID mechanism on next connection
