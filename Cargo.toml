@@ -39,7 +39,7 @@ sha2 = "0.10"
 thiserror = "2"
 
 # Workspace crates
-sshfwd-common = { path = "crates/sshfwd-common" }
+sshfwd-common = { version = "0.1.0", path = "crates/sshfwd-common" }
 
 # Optimized release profile for the agent binary (small, statically linked)
 [profile.release-agent]

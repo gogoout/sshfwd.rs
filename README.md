@@ -88,14 +88,14 @@ sshfwd user@hostname --agent-path ./target/debug/sshfwd-agent
 ### TUI
 
 ```
-╭ ● user@host │ 5 ports │ 2 fwd ──────────────────────╮
-│ FWD       PORT    PROTO   PID      COMMAND          │
-│▶->:5432  5432    tcp     1234     postgresql/15/... │
-│ ->:8080  8080    tcp6    5678     node server.js    │
-│ ──────── ──────── ─────── ──────── ─────────────────│
-│          3000    tcp     9012     ruby bin/rails s  │
-│          6379    tcp     3456     redis-server      │
-╰─────────────────────────────────────────────────────╯
+╭ ● user@host │ 5 ports │ 2 fwd ────────────────────╮
+│ FWD       PORT    PROTO   PID      COMMAND         │
+│▶->:5432  5432    tcp     1234     postgresql/15/..│
+│ ->:8080  8080    tcp6    5678     node server.js  │
+│ ──────── ──────── ─────── ──────── ────────────────│
+│          3000    tcp     9012     ruby bin/rails s│
+│          6379    tcp     3456     redis-server    │
+╰───────────────────────────────────────────────────╯
  <j/k>Navigate <g/G>Top/Bottom <Enter/f>Forward <F>Custom Port <q>Quit
 ```
 
@@ -155,15 +155,15 @@ Event loop uses the [dua-cli pattern](https://github.com/Byron/dua-cli): bare `c
 ### Data Flow
 
 ```
-┌─ Main App ──────────┐                    ┌──── Remote Server ────┐
-│                     │                    │                       │
-│ 1. Connect (SSH)    │───── russh ────────│ 2. Upload Agent       │
-│ 3. Deploy Agent     │──── exec ch ───────│ 4. Run Agent Loop     │
-│ 5. Parse JSON       │◄── stdout pipe ────│    (scan every 2s)    │
-│ 6. Display TUI      │                    │                       │
-│ 7. Forward Ports    │── direct-tcpip ────│ 8. Tunnel Traffic     │
-│                     │                    │                       │
-└─────────────────────┘                    └───────────────────────┘
+┌─ Main App ──────────┐                   ┌──── Remote Server ────┐
+│                     │                   │                       │
+│ 1. Connect (SSH)    │───── russh ───────│ 2. Upload Agent       │
+│ 3. Deploy Agent     │──── exec ch ──────│ 4. Run Agent Loop     │
+│ 5. Parse JSON       │◄── stdout pipe ───│    (scan every 2s)    │
+│ 6. Display TUI      │                   │                       │
+│ 7. Forward Ports    │── direct-tcpip ───│ 8. Tunnel Traffic     │
+│                     │                   │                       │
+└─────────────────────┘                   └───────────────────────┘
 ```
 
 ### Key Design Decisions

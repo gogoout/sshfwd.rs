@@ -5,8 +5,10 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
-description = "Internal types for sshfwd (not published)"
-publish = false
+description = "Internal types for sshfwd - not intended for direct use"
+documentation = "https://github.com/gogoout/sshfwd.rs#readme"
+keywords = ["ssh", "internal"]
+categories = ["command-line-utilities"]
 
 [dependencies]
 serde = { workspace = true, features = ["derive"] }
