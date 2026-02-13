@@ -216,15 +216,14 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<ForwardCommand> {
             );
 
             // Detect port changes for notifications
-            let new_scan_ports: HashSet<u16> = current_remote_ports;
             let port_changes = crate::notify::detect_port_changes(
                 model.prev_scan_ports.as_ref(),
-                &new_scan_ports,
+                &current_remote_ports,
                 &model.forwards,
                 &ports,
                 &model.ports,
             );
-            model.prev_scan_ports = Some(new_scan_ports);
+            model.prev_scan_ports = Some(current_remote_ports);
 
             if ports != model.ports {
                 model.ports = ports;
@@ -526,12 +525,6 @@ fn save_forwards(model: &Model) {
     let forwards: Vec<PersistedForward> = model
         .forwards
         .iter()
-        .filter(|(_, entry)| {
-            matches!(
-                entry.status,
-                ForwardStatus::Active | ForwardStatus::Starting | ForwardStatus::Paused
-            )
-        })
         .map(|(&remote_port, entry)| PersistedForward {
             remote_port,
             local_port: entry.local_port,
@@ -545,7 +538,7 @@ pub fn view(model: &mut Model, frame: &mut ratatui::Frame) {
     let areas = crate::ui::layout_areas(frame.area());
     crate::ui::table::render(model, frame, areas.table);
     crate::ui::hotkey_bar::render(model, frame, areas.hotkey_bar);
-    if !matches!(model.modal, ModalState::None) {
+    if model.modal != ModalState::None {
         crate::ui::modal::render(model, frame);
     }
 }

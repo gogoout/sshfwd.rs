@@ -4,7 +4,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Clear, Paragraph};
 use ratatui::Frame;
 
-use super::{BRACKET_STYLE, DESC_STYLE, KEY_STYLE};
+use super::hotkey_spans;
 use crate::app::{ModalState, Model};
 
 pub fn render(model: &Model, frame: &mut Frame) {
@@ -55,17 +55,10 @@ pub fn render(model: &Model, frame: &mut Frame) {
 
     lines.push(Line::raw(""));
 
-    lines.push(Line::from(vec![
-        Span::raw("  "),
-        Span::styled("<", BRACKET_STYLE),
-        Span::styled("Enter", KEY_STYLE),
-        Span::styled(">", BRACKET_STYLE),
-        Span::styled("Confirm  ", DESC_STYLE),
-        Span::styled("<", BRACKET_STYLE),
-        Span::styled("Esc", KEY_STYLE),
-        Span::styled(">", BRACKET_STYLE),
-        Span::styled("Cancel", DESC_STYLE),
-    ]));
+    let mut hint_spans = vec![Span::raw("  ")];
+    hint_spans.extend(hotkey_spans("Enter", "Confirm  "));
+    hint_spans.extend(hotkey_spans("Esc", "Cancel"));
+    lines.push(Line::from(hint_spans));
 
     let paragraph = Paragraph::new(lines);
     frame.render_widget(paragraph, inner);
