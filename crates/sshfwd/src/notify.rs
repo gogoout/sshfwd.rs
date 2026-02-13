@@ -123,26 +123,7 @@ fn notify_port_changes(destination: &str, changes: &[PortChange]) {
     }
 
     let summary = format!("sshfwd - {destination}");
-    let body: String = changes
-        .iter()
-        .map(|c| {
-            let symbol = match c.kind {
-                PortChangeKind::Appeared => "+",
-                PortChangeKind::Disappeared => "-",
-                PortChangeKind::Reactivated => "~",
-            };
-            let verb = match c.kind {
-                PortChangeKind::Appeared => "appeared",
-                PortChangeKind::Disappeared => "disappeared",
-                PortChangeKind::Reactivated => "reactivated",
-            };
-            match &c.process_name {
-                Some(name) => format!("{symbol} Port {} {verb} ({name})", c.port),
-                None => format!("{symbol} Port {} {verb}", c.port),
-            }
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
+    let body = format_notification_body(changes);
 
     // Fire-and-forget to avoid blocking the main loop
     std::thread::spawn(move || {
@@ -159,6 +140,41 @@ fn notify_port_changes(destination: &str, changes: &[PortChange]) {
 
         let _ = n.show();
     });
+}
+
+/// Format changes grouped by kind into compact lines.
+///
+/// Single change:  `+ 8080 (node)`
+/// Multiple:       `+ 80, 443 · - 3000 (app) · ~ 5432`
+fn format_notification_body(changes: &[PortChange]) -> String {
+    let mut appeared = Vec::new();
+    let mut disappeared = Vec::new();
+    let mut reactivated = Vec::new();
+
+    for c in changes {
+        let entry = match &c.process_name {
+            Some(name) => format!("{} ({})", c.port, name),
+            None => format!("{}", c.port),
+        };
+        match c.kind {
+            PortChangeKind::Appeared => appeared.push(entry),
+            PortChangeKind::Disappeared => disappeared.push(entry),
+            PortChangeKind::Reactivated => reactivated.push(entry),
+        }
+    }
+
+    let mut groups = Vec::new();
+    if !appeared.is_empty() {
+        groups.push(format!("+ {}", appeared.join(", ")));
+    }
+    if !reactivated.is_empty() {
+        groups.push(format!("~ {}", reactivated.join(", ")));
+    }
+    if !disappeared.is_empty() {
+        groups.push(format!("- {}", disappeared.join(", ")));
+    }
+
+    groups.join(" · ")
 }
 
 #[cfg(test)]
@@ -260,5 +276,40 @@ mod tests {
 
         let changes = detect_port_changes(Some(&prev), &new, &forwards, &[], &[]);
         assert!(changes.is_empty());
+    }
+
+    #[test]
+    fn format_single_change() {
+        let changes = vec![PortChange {
+            port: 8080,
+            kind: PortChangeKind::Appeared,
+            process_name: Some("node".to_string()),
+        }];
+        assert_eq!(format_notification_body(&changes), "+ 8080 (node)");
+    }
+
+    #[test]
+    fn format_grouped_changes() {
+        let changes = vec![
+            PortChange {
+                port: 80,
+                kind: PortChangeKind::Appeared,
+                process_name: None,
+            },
+            PortChange {
+                port: 443,
+                kind: PortChangeKind::Appeared,
+                process_name: Some("nginx".to_string()),
+            },
+            PortChange {
+                port: 3000,
+                kind: PortChangeKind::Disappeared,
+                process_name: Some("app".to_string()),
+            },
+        ];
+        assert_eq!(
+            format_notification_body(&changes),
+            "+ 80, 443 (nginx) · - 3000 (app)"
+        );
     }
 }
