@@ -2922,7 +2922,7 @@ dependencies = [
 
 [[package]]
 name = "sshfwd"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "crossbeam-channel",
  "crossterm",
@@ -2940,7 +2940,7 @@ dependencies = [
 
 [[package]]
 name = "sshfwd-agent"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "libc",
  "serde_json",
@@ -2949,7 +2949,7 @@ dependencies = [
 
 [[package]]
 name = "sshfwd-common"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "serde",
  "serde_json",

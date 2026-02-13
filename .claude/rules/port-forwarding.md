@@ -33,15 +33,22 @@ Triggers:
 ## Display rows and table grouping
 
 `ui/table.rs` exposes `DisplayRow` enum and `build_display_rows(model)`:
-- Forwarded ports first (sorted by port)
+- Forwarded ports and inactive forwards merged together (sorted by port)
+- `InactiveForward(u16)` — paused forwards whose remote port is not in the current scan, shown when `model.show_inactive_forwards` is true (toggle `p`), rendered dim with `(inactive)` label
 - Separator row (dim `─`, only when both groups non-empty)
 - Non-forwarded ports (original sort: port → PID → protocol)
 
 `selected_index` is a visual index into display rows. Navigation skips separator rows. `adjust_selection()` in `app.rs` preserves the selected port across display-row reorderings (scan updates, forward start/stop).
 
+Pressing `Enter`/`f` on an inactive forward sends `ForwardCommand::Stop`, removing the persisted forward.
+
 ## Persistence
 
 `forward/persistence.rs` stores active forwards in `~/.sshfwd/forwards.json`, keyed by destination string. On startup, persisted forwards load as `Paused` and reactivate when the first scan finds their remote port. The `Reactivate` command carries `local_port` so it works even without a prior listener handle (fresh process).
+
+## Desktop notifications
+
+`notify.rs` sends fire-and-forget notifications (via `notify-rust`) when ports change between scans. Change detection is in `update()` `ScanReceived` handler using `model.prev_scan_ports` diff. First scan is skipped (no baseline). Controlled by `model.notifications_enabled` (CLI flag `--no-notify`). On macOS, the icon is set to Terminal.app via `set_application("com.apple.Terminal")`; on Linux, uses `utilities-terminal` freedesktop icon.
 
 ## Adding a new ForwardCommand
 

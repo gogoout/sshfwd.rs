@@ -17,6 +17,7 @@
    ```
 
 3. **GitHub Actions workflow automatically:**
+   - Generates changelog from commits (via `git-cliff` + `cliff.toml`) and creates/updates the GitHub Release
    - Builds agent binaries for all 4 platforms (Linux x86_64/ARM64, macOS Intel/ARM64)
    - Publishes `sshfwd-common@X.Y.Z` to crates.io
    - Waits 60 seconds for crates.io index update

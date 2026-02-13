@@ -18,6 +18,8 @@ A TUI-based SSH port forwarding management tool built with Rust. Inspired by [k9
 - **Smart lifecycle management** — auto-pauses when remote port disappears, reactivates when it returns (unlike VS Code's stale forwards)
 - **Clear error recovery** — bind failures show a modal to choose a different port (no silent fallbacks)
 - **Visual grouping** — forwarded ports appear at the top, separated from unforwarded ports
+- **Inactive forward visibility** — toggle `p` to show persisted forwards whose remote port isn't running
+- **Desktop notifications** — get notified when ports appear, disappear, or reactivate (disable with `--no-notify`)
 - **Session persistence** — remembers active forwards per destination in `~/.sshfwd/forwards.json`
 - **Pure Rust SSH** — no system OpenSSH dependency, uses `russh` for in-process connections
 - **ProxyJump support** — recursive tunneling through jump hosts via SSH config
@@ -49,6 +51,9 @@ The published crate includes prebuilt agent binaries for all supported platforms
 # Connect to a remote server
 sshfwd user@hostname
 
+# Disable desktop notifications
+sshfwd user@hostname --no-notify
+
 # Development: override agent binary
 sshfwd user@hostname --agent-path ./target/debug/sshfwd-agent
 ```
@@ -64,7 +69,7 @@ sshfwd user@hostname --agent-path ./target/debug/sshfwd-agent
 │          3000    tcp     9012     ruby bin/rails s│
 │          6379    tcp     3456     redis-server    │
 ╰───────────────────────────────────────────────────╯
- <j/k>Navigate <g/G>Top/Bottom <Enter/f>Forward <F>Custom Port <q>Quit
+ <j/k>Navigate <g/G>Top/Bottom <Enter/f>Forward <F>Custom Port <p>Inactive <q>Quit
 ```
 
 Forwarded ports are grouped at the top with a visual separator.
@@ -93,6 +98,7 @@ When pressing `F`/`Shift+Enter`, or when a bind error occurs:
 | `G` | Jump to bottom |
 | `Enter` / `f` | Toggle forwarding (same local port) |
 | `F` / `Shift+Enter` | Forward with custom local port (modal) |
+| `p` | Toggle inactive persisted forwards |
 | `q` / `Esc` / `Ctrl+C` | Quit |
 
 ## Development

@@ -4,24 +4,24 @@
 
 All TUI state flows through `crates/sshfwd/src/app.rs`:
 - **Model**: single state struct (ports, forwards, connection state, modal, selection)
-- **Message**: enum of all events (scan data, key press, forward events, tick)
+- **Message**: enum of all events (scan data, key press, mouse events, forward events, tick)
 - **update()**: pure state transitions, sets `needs_render` flag, returns `ForwardCommand`s
-- **view()**: renders table + hotkey bar, then modal overlay if `ModalState != None`
+- **view()**: takes `&mut Model`, renders table + hotkey bar, then modal overlay if `ModalState != None`
 
 ## Event loop (dua-cli pattern)
 
-- Keyboard: dedicated OS thread with bare `crossterm::event::read()` (no `poll()`) → `crossbeam_channel::bounded(0)`
+- Keyboard + mouse: dedicated OS thread with bare `crossterm::event::read()` (no `poll()`) → `crossbeam_channel::bounded(0)`
 - Background: discovery + tick (1s) → `crossbeam_channel::unbounded()`
 - Main loop: `crossbeam_channel::select!` over both channels, render after each event
 - Key events accept `Press` and `Repeat` (filter only `Release`) for held-key responsiveness
+- Mouse: `EnableMouseCapture`/`DisableMouseCapture` in setup/teardown/panic hook
 - Terminal backend wrapped in `BufWriter` to batch write syscalls per frame
 
 ## Key patterns
 
-- Display rows: forwarded ports grouped at top, separator, then non-forwarded (via `build_display_rows()`)
-- `selected_index` is a visual index into display rows; navigation skips separator
-- `adjust_selection()` preserves selected port across display-row reorderings
 - `needs_render` flag: skip draw calls when state hasn't visually changed
+- `view()` takes `&mut Model` — `render()` writes `table_state` and `table_content_area` for mouse hit-testing
+- Display rows and table grouping details: see [Port Forwarding](/.claude/rules/port-forwarding.md)
 
 ## Exit gotcha
 

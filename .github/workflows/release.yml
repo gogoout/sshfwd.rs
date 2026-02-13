@@ -12,6 +12,29 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
+  # Generate changelog and create GitHub Release
+  changelog:
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate changelog
+        uses: orhun/git-cliff-action@v4
+        id: changelog
+        with:
+          config: cliff.toml
+          args: --latest --strip header
+
+      - name: Create or update GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          body: ${{ steps.changelog.outputs.content }}
+
   # Build agent binaries for all platforms (same as CI)
   build-agents:
     runs-on: ${{ matrix.os }}
