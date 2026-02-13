@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::time::Instant;
 
 use sshfwd_common::types::ListeningPort;
 
@@ -32,50 +33,91 @@ pub fn detect_port_changes(
 
     let mut changes = Vec::new();
 
-    // Appeared or reactivated ports
-    for &port in new_scan_ports {
-        if !prev.contains(&port) {
-            let kind = if forwards
-                .get(&port)
-                .is_some_and(|e| e.status == ForwardStatus::Starting)
-            {
-                PortChangeKind::Reactivated
-            } else {
-                PortChangeKind::Appeared
-            };
-            let process_name = new_ports
-                .iter()
-                .find(|p| p.port == port)
-                .and_then(|p| p.process.as_ref())
-                .map(|p| p.cmdline.clone());
-            changes.push(PortChange {
-                port,
-                kind,
-                process_name,
-            });
-        }
+    // Appeared or reactivated ports (sorted for deterministic notification order)
+    let mut appeared: Vec<u16> = new_scan_ports.difference(prev).copied().collect();
+    appeared.sort();
+    for port in appeared {
+        let kind = if forwards
+            .get(&port)
+            .is_some_and(|e| e.status == ForwardStatus::Starting)
+        {
+            PortChangeKind::Reactivated
+        } else {
+            PortChangeKind::Appeared
+        };
+        let process_name = new_ports
+            .iter()
+            .find(|p| p.port == port)
+            .and_then(|p| p.process.as_ref())
+            .map(|p| p.cmdline.clone());
+        changes.push(PortChange {
+            port,
+            kind,
+            process_name,
+        });
     }
 
-    // Disappeared ports
-    for &port in prev {
-        if !new_scan_ports.contains(&port) {
-            let process_name = old_ports
-                .iter()
-                .find(|p| p.port == port)
-                .and_then(|p| p.process.as_ref())
-                .map(|p| p.cmdline.clone());
-            changes.push(PortChange {
-                port,
-                kind: PortChangeKind::Disappeared,
-                process_name,
-            });
-        }
+    // Disappeared ports (sorted for deterministic notification order)
+    let mut disappeared: Vec<u16> = prev.difference(new_scan_ports).copied().collect();
+    disappeared.sort();
+    for port in disappeared {
+        let process_name = old_ports
+            .iter()
+            .find(|p| p.port == port)
+            .and_then(|p| p.process.as_ref())
+            .map(|p| p.cmdline.clone());
+        changes.push(PortChange {
+            port,
+            kind: PortChangeKind::Disappeared,
+            process_name,
+        });
     }
 
     changes
 }
 
-pub fn notify_port_changes(destination: &str, changes: &[PortChange]) {
+/// Batches port change notifications across scans, flushing after a quiet period.
+const NOTIFY_DEBOUNCE_SECS: u64 = 2;
+
+pub struct NotifyBatch {
+    pending: Vec<PortChange>,
+    last_change_at: Option<Instant>,
+}
+
+impl NotifyBatch {
+    pub fn new() -> Self {
+        Self {
+            pending: Vec::new(),
+            last_change_at: None,
+        }
+    }
+
+    /// Add new changes to the pending batch.
+    pub fn extend(&mut self, changes: Vec<PortChange>) {
+        if !changes.is_empty() {
+            self.pending.extend(changes);
+            self.last_change_at = Some(Instant::now());
+        }
+    }
+
+    /// Flush pending changes if the debounce window has elapsed.
+    /// Returns true if a notification was sent.
+    pub fn flush_if_ready(&mut self, destination: &str) -> bool {
+        let ready = match self.last_change_at {
+            Some(t) => t.elapsed().as_secs() >= NOTIFY_DEBOUNCE_SECS,
+            None => false,
+        };
+        if ready && !self.pending.is_empty() {
+            let changes = std::mem::take(&mut self.pending);
+            self.last_change_at = None;
+            notify_port_changes(destination, &changes);
+            return true;
+        }
+        false
+    }
+}
+
+fn notify_port_changes(destination: &str, changes: &[PortChange]) {
     if changes.is_empty() {
         return;
     }
@@ -117,4 +159,106 @@ pub fn notify_port_changes(destination: &str, changes: &[PortChange]) {
 
         let _ = n.show();
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sshfwd_common::types::{ListeningPort, ProcessInfo, Protocol};
+
+    fn make_port(port: u16, name: &str) -> ListeningPort {
+        ListeningPort {
+            protocol: Protocol::Tcp,
+            local_addr: "0.0.0.0".to_string(),
+            port,
+            process: Some(ProcessInfo {
+                pid: port as u32,
+                name: name.to_string(),
+                cmdline: name.to_string(),
+                uid: 1000,
+            }),
+        }
+    }
+
+    #[test]
+    fn first_scan_returns_empty() {
+        let new: HashSet<u16> = [80, 443].into();
+        let forwards = HashMap::new();
+        let ports = vec![make_port(80, "nginx"), make_port(443, "nginx")];
+
+        let changes = detect_port_changes(None, &new, &forwards, &ports, &[]);
+        assert!(changes.is_empty());
+    }
+
+    #[test]
+    fn detects_appeared_ports() {
+        let prev: HashSet<u16> = [80].into();
+        let new: HashSet<u16> = [80, 443, 8080].into();
+        let forwards = HashMap::new();
+        let new_ports = vec![
+            make_port(80, "nginx"),
+            make_port(443, "nginx"),
+            make_port(8080, "node"),
+        ];
+
+        let changes = detect_port_changes(Some(&prev), &new, &forwards, &new_ports, &[]);
+        assert_eq!(changes.len(), 2);
+        // Should be sorted by port
+        assert_eq!(changes[0].port, 443);
+        assert!(matches!(changes[0].kind, PortChangeKind::Appeared));
+        assert_eq!(changes[1].port, 8080);
+        assert!(matches!(changes[1].kind, PortChangeKind::Appeared));
+    }
+
+    #[test]
+    fn detects_disappeared_ports() {
+        let prev: HashSet<u16> = [80, 443, 8080].into();
+        let new: HashSet<u16> = [80].into();
+        let forwards = HashMap::new();
+        let old_ports = vec![
+            make_port(80, "nginx"),
+            make_port(443, "nginx"),
+            make_port(8080, "node"),
+        ];
+
+        let changes = detect_port_changes(Some(&prev), &new, &forwards, &[], &old_ports);
+        assert_eq!(changes.len(), 2);
+        // Should be sorted by port
+        assert_eq!(changes[0].port, 443);
+        assert!(matches!(changes[0].kind, PortChangeKind::Disappeared));
+        assert_eq!(changes[1].port, 8080);
+        assert!(matches!(changes[1].kind, PortChangeKind::Disappeared));
+    }
+
+    #[test]
+    fn detects_reactivated_forward() {
+        let prev: HashSet<u16> = [80].into();
+        let new: HashSet<u16> = [80, 5432].into();
+        let mut forwards = HashMap::new();
+        forwards.insert(
+            5432,
+            ForwardEntry {
+                local_port: 5432,
+                status: ForwardStatus::Starting,
+                active_connections: 0,
+            },
+        );
+        let new_ports = vec![make_port(80, "nginx"), make_port(5432, "postgres")];
+
+        let changes = detect_port_changes(Some(&prev), &new, &forwards, &new_ports, &[]);
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].port, 5432);
+        assert!(matches!(changes[0].kind, PortChangeKind::Reactivated));
+        assert_eq!(changes[0].process_name.as_deref(), Some("postgres"));
+    }
+
+    #[test]
+    fn no_changes_when_same() {
+        let prev: HashSet<u16> = [80, 443].into();
+        let new: HashSet<u16> = [80, 443].into();
+        let forwards = HashMap::new();
+
+        let changes = detect_port_changes(Some(&prev), &new, &forwards, &[], &[]);
+        assert!(changes.is_empty());
+    }
 }
