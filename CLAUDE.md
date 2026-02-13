@@ -28,3 +28,5 @@ cargo clippy --all-targets --all-features
 cargo test --workspace                      # 22 tests
 cargo build -p sshfwd
 ```
+
+After adding features or fixing bugs, run `/simplify` to reduce duplication and improve isolation.

@@ -1,13 +1,9 @@
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::Frame;
 
+use super::{BRACKET_STYLE, DESC_STYLE, KEY_STYLE};
 use crate::app::Model;
-
-const KEY_STYLE: Style = Style::new().fg(Color::Black).bg(Color::DarkGray);
-const BRACKET_STYLE: Style = Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD);
-const DESC_STYLE: Style = Style::new().fg(Color::DarkGray);
 
 pub fn render(_model: &Model, frame: &mut Frame, area: Rect) {
     let line = Line::from(vec![

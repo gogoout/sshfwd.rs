@@ -1,6 +1,6 @@
 pub mod persistence;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use tokio::net::TcpListener;
@@ -224,6 +224,54 @@ impl ForwardManager {
                 remote_port,
             }));
     }
+}
+
+/// Compare current scan ports against tracked forwards and produce
+/// Pause/Reactivate commands. Also updates entry statuses in-place.
+pub fn reconcile_forwards(
+    forwards: &mut HashMap<u16, ForwardEntry>,
+    current_remote_ports: &HashSet<u16>,
+    remote_host: &str,
+) -> Vec<ForwardCommand> {
+    let mut commands = Vec::new();
+
+    for (&remote_port, entry) in forwards.iter() {
+        match entry.status {
+            ForwardStatus::Active | ForwardStatus::Starting => {
+                if !current_remote_ports.contains(&remote_port) {
+                    commands.push(ForwardCommand::Pause { remote_port });
+                }
+            }
+            ForwardStatus::Paused => {
+                if current_remote_ports.contains(&remote_port) {
+                    commands.push(ForwardCommand::Reactivate {
+                        remote_port,
+                        local_port: entry.local_port,
+                        remote_host: remote_host.to_string(),
+                    });
+                }
+            }
+        }
+    }
+
+    // Update statuses for the commands we just produced
+    for cmd in &commands {
+        match cmd {
+            ForwardCommand::Pause { remote_port } => {
+                if let Some(entry) = forwards.get_mut(remote_port) {
+                    entry.status = ForwardStatus::Paused;
+                }
+            }
+            ForwardCommand::Reactivate { remote_port, .. } => {
+                if let Some(entry) = forwards.get_mut(remote_port) {
+                    entry.status = ForwardStatus::Starting;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    commands
 }
 
 async fn tunnel_connection(

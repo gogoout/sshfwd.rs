@@ -107,6 +107,35 @@ impl Model {
     }
 }
 
+/// Move selection down by one, skipping separator rows.
+fn move_selection_down(model: &mut Model) {
+    let display_rows = build_display_rows(model);
+    let last = display_rows.len().saturating_sub(1);
+    if model.selected_index < last {
+        let next = model.selected_index + 1;
+        model.selected_index = if matches!(display_rows.get(next), Some(DisplayRow::Separator)) {
+            (next + 1).min(last)
+        } else {
+            next
+        };
+        model.needs_render = true;
+    }
+}
+
+/// Move selection up by one, skipping separator rows.
+fn move_selection_up(model: &mut Model) {
+    let display_rows = build_display_rows(model);
+    if model.selected_index > 0 {
+        let prev = model.selected_index - 1;
+        model.selected_index = if matches!(display_rows.get(prev), Some(DisplayRow::Separator)) {
+            prev.saturating_sub(1)
+        } else {
+            prev
+        };
+        model.needs_render = true;
+    }
+}
+
 /// Recompute selected_index after display rows change (forward added/removed, scan update).
 /// Tries to keep `target_port` selected; falls back to clamping.
 fn adjust_selection(model: &mut Model, target_port: Option<u16>) {
@@ -177,88 +206,22 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<ForwardCommand> {
 
             // Reconcile forwards with current scan
             let current_remote_ports: HashSet<u16> = ports.iter().map(|p| p.port).collect();
-
-            for (&remote_port, entry) in &model.forwards {
-                match entry.status {
-                    ForwardStatus::Active | ForwardStatus::Starting => {
-                        if !current_remote_ports.contains(&remote_port) {
-                            commands.push(ForwardCommand::Pause { remote_port });
-                        }
-                    }
-                    ForwardStatus::Paused => {
-                        if current_remote_ports.contains(&remote_port) {
-                            commands.push(ForwardCommand::Reactivate {
-                                remote_port,
-                                local_port: entry.local_port,
-                                remote_host: model.remote_host(),
-                            });
-                        }
-                    }
-                }
-            }
-
-            // Update status for commands we just issued
-            for cmd in &commands {
-                match cmd {
-                    ForwardCommand::Pause { remote_port } => {
-                        if let Some(entry) = model.forwards.get_mut(remote_port) {
-                            entry.status = ForwardStatus::Paused;
-                        }
-                    }
-                    ForwardCommand::Reactivate { remote_port, .. } => {
-                        if let Some(entry) = model.forwards.get_mut(remote_port) {
-                            entry.status = ForwardStatus::Starting;
-                        }
-                    }
-                    _ => {}
-                }
-            }
+            let remote_host = model.remote_host();
+            commands = crate::forward::reconcile_forwards(
+                &mut model.forwards,
+                &current_remote_ports,
+                &remote_host,
+            );
 
             // Detect port changes for notifications
             let new_scan_ports: HashSet<u16> = current_remote_ports;
-            let mut port_changes = Vec::new();
-            if let Some(ref prev) = model.prev_scan_ports {
-                // New ports
-                for &port in &new_scan_ports {
-                    if !prev.contains(&port) {
-                        let kind = if model
-                            .forwards
-                            .get(&port)
-                            .is_some_and(|e| e.status == ForwardStatus::Starting)
-                        {
-                            crate::notify::PortChangeKind::Reactivated
-                        } else {
-                            crate::notify::PortChangeKind::Appeared
-                        };
-                        let process_name = ports
-                            .iter()
-                            .find(|p| p.port == port)
-                            .and_then(|p| p.process.as_ref())
-                            .map(|p| p.cmdline.clone());
-                        port_changes.push(crate::notify::PortChange {
-                            port,
-                            kind,
-                            process_name,
-                        });
-                    }
-                }
-                // Disappeared ports
-                for &port in prev {
-                    if !new_scan_ports.contains(&port) {
-                        let process_name = model
-                            .ports
-                            .iter()
-                            .find(|p| p.port == port)
-                            .and_then(|p| p.process.as_ref())
-                            .map(|p| p.cmdline.clone());
-                        port_changes.push(crate::notify::PortChange {
-                            port,
-                            kind: crate::notify::PortChangeKind::Disappeared,
-                            process_name,
-                        });
-                    }
-                }
-            }
+            let port_changes = crate::notify::detect_port_changes(
+                model.prev_scan_ports.as_ref(),
+                &new_scan_ports,
+                &model.forwards,
+                &ports,
+                &model.ports,
+            );
             model.prev_scan_ports = Some(new_scan_ports);
 
             if ports != model.ports {
@@ -362,31 +325,10 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<ForwardCommand> {
                 use crossterm::event::{MouseButton, MouseEventKind};
                 match mouse.kind {
                     MouseEventKind::ScrollUp => {
-                        let display_rows = build_display_rows(model);
-                        if model.selected_index > 0 {
-                            let prev = model.selected_index - 1;
-                            model.selected_index =
-                                if matches!(display_rows.get(prev), Some(DisplayRow::Separator)) {
-                                    prev.saturating_sub(1)
-                                } else {
-                                    prev
-                                };
-                            model.needs_render = true;
-                        }
+                        move_selection_up(model);
                     }
                     MouseEventKind::ScrollDown => {
-                        let display_rows = build_display_rows(model);
-                        let last = display_rows.len().saturating_sub(1);
-                        if model.selected_index < last {
-                            let next = model.selected_index + 1;
-                            model.selected_index =
-                                if matches!(display_rows.get(next), Some(DisplayRow::Separator)) {
-                                    (next + 1).min(last)
-                                } else {
-                                    next
-                                };
-                            model.needs_render = true;
-                        }
+                        move_selection_down(model);
                     }
                     MouseEventKind::Down(MouseButton::Left) => {
                         if let Some(content) = model.table_content_area {
@@ -423,31 +365,10 @@ fn handle_normal_key(model: &mut Model, key: KeyEvent) -> Vec<ForwardCommand> {
             model.running = false;
         }
         KeyCode::Char('j') | KeyCode::Down => {
-            let display_rows = build_display_rows(model);
-            let last = display_rows.len().saturating_sub(1);
-            if model.selected_index < last {
-                let next = model.selected_index + 1;
-                model.selected_index =
-                    if matches!(display_rows.get(next), Some(DisplayRow::Separator)) {
-                        (next + 1).min(last)
-                    } else {
-                        next
-                    };
-                model.needs_render = true;
-            }
+            move_selection_down(model);
         }
         KeyCode::Char('k') | KeyCode::Up => {
-            let display_rows = build_display_rows(model);
-            if model.selected_index > 0 {
-                let prev = model.selected_index - 1;
-                model.selected_index =
-                    if matches!(display_rows.get(prev), Some(DisplayRow::Separator)) {
-                        prev.saturating_sub(1)
-                    } else {
-                        prev
-                    };
-                model.needs_render = true;
-            }
+            move_selection_up(model);
         }
         KeyCode::Char('g') => {
             if model.selected_index != 0 {
@@ -473,17 +394,7 @@ fn handle_normal_key(model: &mut Model, key: KeyEvent) -> Vec<ForwardCommand> {
             model.needs_render = true;
         }
         KeyCode::Enter if key.modifiers.contains(KeyModifiers::SHIFT) => {
-            if let Some(remote_port) = model.selected_port() {
-                if !model.forwards.contains_key(&remote_port) {
-                    model.modal = ModalState::PortInput {
-                        remote_port,
-                        buffer: format!("{}", remote_port),
-                        remote_host: model.remote_host(),
-                        error: None,
-                    };
-                    model.needs_render = true;
-                }
-            }
+            open_port_modal(model);
         }
         KeyCode::Enter | KeyCode::Char('f') => {
             if let Some(remote_port) = model.selected_port() {
@@ -508,22 +419,26 @@ fn handle_normal_key(model: &mut Model, key: KeyEvent) -> Vec<ForwardCommand> {
             }
         }
         KeyCode::Char('F') => {
-            if let Some(remote_port) = model.selected_port() {
-                if !model.forwards.contains_key(&remote_port) {
-                    model.modal = ModalState::PortInput {
-                        remote_port,
-                        buffer: format!("{}", remote_port),
-                        remote_host: model.remote_host(),
-                        error: None,
-                    };
-                    model.needs_render = true;
-                }
-            }
+            open_port_modal(model);
         }
         _ => {}
     }
 
     commands
+}
+
+fn open_port_modal(model: &mut Model) {
+    if let Some(remote_port) = model.selected_port() {
+        if !model.forwards.contains_key(&remote_port) {
+            model.modal = ModalState::PortInput {
+                remote_port,
+                buffer: format!("{}", remote_port),
+                remote_host: model.remote_host(),
+                error: None,
+            };
+            model.needs_render = true;
+        }
+    }
 }
 
 fn handle_port_input_key(model: &mut Model, key: KeyEvent) -> Vec<ForwardCommand> {
