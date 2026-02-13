@@ -19,7 +19,7 @@ A TUI-based SSH port forwarding management tool built with Rust. Inspired by [k9
 - **Clear error recovery** — bind failures show a modal to choose a different port (no silent fallbacks)
 - **Visual grouping** — forwarded ports appear at the top, separated from unforwarded ports
 - **Inactive forward visibility** — toggle `p` to show persisted forwards whose remote port isn't running
-- **Desktop notifications** — get notified when ports appear, disappear, or reactivate (disable with `--no-notify`)
+- **Desktop notifications** — batched notifications when ports appear, disappear, or reactivate (disable with `--no-notify`)
 - **Session persistence** — remembers active forwards per destination in `~/.sshfwd/forwards.json`
 - **Pure Rust SSH** — no system OpenSSH dependency, uses `russh` for in-process connections
 - **ProxyJump support** — recursive tunneling through jump hosts via SSH config
