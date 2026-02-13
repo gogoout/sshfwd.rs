@@ -53,7 +53,14 @@ pub fn build_display_rows(model: &Model) -> Vec<DisplayRow> {
             }
         }
     }
-    forwarded.sort_by_key(|(port, _)| *port);
+    forwarded.sort_by(|(port_a, row_a), (port_b, row_b)| {
+        port_a.cmp(port_b).then_with(|| match (row_a, row_b) {
+            (DisplayRow::Port(i1), DisplayRow::Port(i2)) => i1.cmp(i2),
+            (DisplayRow::Port(_), DisplayRow::InactiveForward(_)) => std::cmp::Ordering::Less,
+            (DisplayRow::InactiveForward(_), DisplayRow::Port(_)) => std::cmp::Ordering::Greater,
+            _ => std::cmp::Ordering::Equal,
+        })
+    });
 
     let has_top = !forwarded.is_empty();
     let mut rows = Vec::with_capacity(forwarded.len() + 1 + non_forwarded.len());

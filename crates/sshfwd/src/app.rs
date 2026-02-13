@@ -63,6 +63,7 @@ pub struct Model {
     pub show_inactive_forwards: bool,
     pub notifications_enabled: bool,
     pub prev_scan_ports: Option<HashSet<u16>>,
+    pub notify_batch: crate::notify::NotifyBatch,
     pub table_state: ratatui::widgets::TableState,
     pub table_content_area: Option<ratatui::layout::Rect>,
 }
@@ -86,6 +87,7 @@ impl Model {
             show_inactive_forwards: false,
             notifications_enabled: true,
             prev_scan_ports: None,
+            notify_batch: crate::notify::NotifyBatch::new(),
             table_state: ratatui::widgets::TableState::default(),
             table_content_area: None,
         }
@@ -232,8 +234,8 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<ForwardCommand> {
                 model.needs_render = true;
             }
 
-            if model.notifications_enabled && !port_changes.is_empty() {
-                crate::notify::notify_port_changes(&model.destination, &port_changes);
+            if model.notifications_enabled {
+                model.notify_batch.extend(port_changes);
             }
         }
         Message::DiscoveryWarning(_) => {}
@@ -316,6 +318,8 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<ForwardCommand> {
                     model.needs_render = true;
                 }
             }
+            // Flush batched notifications after debounce window
+            model.notify_batch.flush_if_ready(&model.destination);
         }
         Message::Resize(_, _) => {
             model.needs_render = true;
@@ -389,8 +393,9 @@ fn handle_normal_key(model: &mut Model, key: KeyEvent) -> Vec<ForwardCommand> {
             }
         }
         KeyCode::Char('p') => {
+            let selected_port = model.selected_port();
             model.show_inactive_forwards = !model.show_inactive_forwards;
-            adjust_selection(model, model.selected_port());
+            adjust_selection(model, selected_port);
             model.needs_render = true;
         }
         KeyCode::Enter if key.modifiers.contains(KeyModifiers::SHIFT) => {
