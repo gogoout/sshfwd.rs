@@ -7,6 +7,8 @@ TUI-based SSH port forwarding tool using ratatui, inspired by k9s.
 - `./scripts/build-agents.sh` — cross-compile agents to `crates/sshfwd/prebuilt-agents/` (not committed to git)
 - `cargo run -p sshfwd -- user@hostname` — run with TUI
 - `cargo run -p sshfwd -- user@hostname --agent-path PATH` — dev override for local agent
+- `cargo run -p sshfwd -- user@hostname --no-notify` — disable desktop notifications
+- `git-cliff --latest` — preview changelog for latest tag
 
 ## Rules
 
