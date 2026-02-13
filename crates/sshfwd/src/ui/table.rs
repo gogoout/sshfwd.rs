@@ -1,7 +1,7 @@
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, BorderType, Paragraph, Row, Table, TableState};
+use ratatui::widgets::{Block, BorderType, Paragraph, Row, Table};
 use ratatui::Frame;
 
 use crate::app::{ConnectionState, Model};
@@ -26,34 +26,46 @@ const SELECTED_STYLE: Style = Style::new()
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum DisplayRow {
-    Port(usize), // index into model.ports
+    Port(usize),          // index into model.ports
+    InactiveForward(u16), // remote port of a paused forward not in current scan
     Separator,
 }
 
 pub fn build_display_rows(model: &Model) -> Vec<DisplayRow> {
-    // model.ports is already sorted by port→pid→proto,
-    // so subsets preserve that order.
+    let scan_ports: std::collections::HashSet<u16> = model.ports.iter().map(|p| p.port).collect();
+
     let mut forwarded = Vec::new();
     let mut non_forwarded = Vec::new();
 
     for (i, port) in model.ports.iter().enumerate() {
         if model.forwards.contains_key(&port.port) {
-            forwarded.push(DisplayRow::Port(i));
+            forwarded.push((port.port, DisplayRow::Port(i)));
         } else {
             non_forwarded.push(DisplayRow::Port(i));
         }
     }
 
+    // Merge inactive forwards with active forwards, sorted together by port
+    if model.show_inactive_forwards {
+        for (&port, entry) in &model.forwards {
+            if entry.status == ForwardStatus::Paused && !scan_ports.contains(&port) {
+                forwarded.push((port, DisplayRow::InactiveForward(port)));
+            }
+        }
+    }
+    forwarded.sort_by_key(|(port, _)| *port);
+
+    let has_top = !forwarded.is_empty();
     let mut rows = Vec::with_capacity(forwarded.len() + 1 + non_forwarded.len());
-    rows.extend(forwarded.iter().cloned());
-    if !forwarded.is_empty() && !non_forwarded.is_empty() {
+    rows.extend(forwarded.into_iter().map(|(_, dr)| dr));
+    if has_top && !non_forwarded.is_empty() {
         rows.push(DisplayRow::Separator);
     }
     rows.extend(non_forwarded);
     rows
 }
 
-pub fn render(model: &Model, frame: &mut Frame, area: Rect) {
+pub fn render(model: &mut Model, frame: &mut Frame, area: Rect) {
     let title = header::build_title(model);
 
     let block = Block::bordered()
@@ -78,6 +90,10 @@ pub fn render(model: &Model, frame: &mut Frame, area: Rect) {
 
     let display_rows = build_display_rows(model);
 
+    let inactive_style = Style::default()
+        .fg(Color::DarkGray)
+        .add_modifier(Modifier::DIM);
+
     let rows: Vec<Row> = display_rows
         .iter()
         .map(|dr| match dr {
@@ -91,6 +107,20 @@ pub fn render(model: &Model, frame: &mut Frame, area: Rect) {
                 };
                 Row::new([fwd_cell.0, format!("{}", port.port), proto, pid, cmd])
                     .style(fwd_cell.1.unwrap_or_default())
+            }
+            DisplayRow::InactiveForward(remote_port) => {
+                let local_port = model
+                    .forwards
+                    .get(remote_port)
+                    .map_or(*remote_port, |e| e.local_port);
+                Row::new([
+                    format!("||:{}", local_port),
+                    format!("{}", remote_port),
+                    "-".to_string(),
+                    "-".to_string(),
+                    "(inactive)".to_string(),
+                ])
+                .style(inactive_style)
             }
             DisplayRow::Separator => {
                 let sep = "─".repeat(20);
@@ -106,6 +136,9 @@ pub fn render(model: &Model, frame: &mut Frame, area: Rect) {
         })
         .collect();
 
+    // Compute inner area before block is consumed by Table.
+    let inner = block.inner(area);
+
     let table = Table::new(rows, widths)
         .block(block)
         .header(header_row)
@@ -113,12 +146,20 @@ pub fn render(model: &Model, frame: &mut Frame, area: Rect) {
         .highlight_symbol("▶ ")
         .column_spacing(2);
 
-    let mut table_state = TableState::default();
     if !display_rows.is_empty() {
-        table_state.select(Some(model.selected_index));
+        model.table_state.select(Some(model.selected_index));
     }
 
-    frame.render_stateful_widget(table, area, &mut table_state);
+    frame.render_stateful_widget(table, area, &mut model.table_state);
+
+    // Store content area for mouse hit-testing.
+    // +1 row for the header row gives us where data rows start.
+    model.table_content_area = Some(Rect {
+        x: inner.x,
+        y: inner.y + 1, // skip header row
+        width: inner.width,
+        height: inner.height.saturating_sub(1),
+    });
 }
 
 fn render_splash(model: &Model, frame: &mut Frame, area: Rect, block: Block) {

@@ -5,7 +5,7 @@ use crate::app::{ConnectionState, Model};
 use crate::forward::ForwardStatus;
 use crate::ui::{CONNECTED_CHAR, CONNECTING_CHAR, DISCONNECT_CHAR};
 
-pub fn build_title(model: &Model) -> Line<'_> {
+pub fn build_title(model: &Model) -> Line<'static> {
     let (indicator, indicator_style) = match model.connection_state {
         ConnectionState::Connecting => (CONNECTING_CHAR, Style::default().fg(Color::Yellow)),
         ConnectionState::Connected => (CONNECTED_CHAR, Style::default().fg(Color::Green)),
