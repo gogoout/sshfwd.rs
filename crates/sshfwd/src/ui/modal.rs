@@ -4,11 +4,8 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Clear, Paragraph};
 use ratatui::Frame;
 
+use super::{BRACKET_STYLE, DESC_STYLE, KEY_STYLE};
 use crate::app::{ModalState, Model};
-
-const BRACKET_STYLE: Style = Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD);
-const KEY_STYLE: Style = Style::new().fg(Color::Black).bg(Color::DarkGray);
-const DESC_STYLE: Style = Style::new().fg(Color::DarkGray);
 
 pub fn render(model: &Model, frame: &mut Frame) {
     let ModalState::PortInput {

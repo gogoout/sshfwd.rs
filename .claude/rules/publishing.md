@@ -29,6 +29,3 @@
 - All CI checks must pass before tagging
 - Release workflow builds fresh agent binaries (not stored in git)
 
-## Workflow File
-
-See `.github/workflows/release.yml` for the automated release implementation.

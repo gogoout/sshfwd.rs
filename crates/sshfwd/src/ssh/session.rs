@@ -147,25 +147,7 @@ impl Session {
             .await
             .map_err(SshError::Remote)?;
 
-        let mut stdout = Vec::new();
-        let mut stderr = Vec::new();
-        let mut exit_status = 0u32;
-
-        loop {
-            match channel.wait().await {
-                Some(ChannelMsg::Data { data }) => stdout.extend_from_slice(&data),
-                Some(ChannelMsg::ExtendedData { data, ext: 1 }) => stderr.extend_from_slice(&data),
-                Some(ChannelMsg::ExitStatus { exit_status: code }) => exit_status = code,
-                None => break,
-                _ => {}
-            }
-        }
-
-        Ok(CommandOutput {
-            stdout,
-            stderr,
-            success: exit_status == 0,
-        })
+        collect_channel_output(&mut channel).await
     }
 
     /// Execute a command and return a stream for reading stdout.
@@ -201,26 +183,33 @@ impl Session {
         channel.data(data).await.map_err(SshError::Remote)?;
         channel.eof().await.map_err(SshError::Remote)?;
 
-        let mut stdout = Vec::new();
-        let mut stderr = Vec::new();
-        let mut exit_status = 0u32;
-
-        loop {
-            match channel.wait().await {
-                Some(ChannelMsg::Data { data }) => stdout.extend_from_slice(&data),
-                Some(ChannelMsg::ExtendedData { data, ext: 1 }) => stderr.extend_from_slice(&data),
-                Some(ChannelMsg::ExitStatus { exit_status: code }) => exit_status = code,
-                None => break,
-                _ => {}
-            }
-        }
-
-        Ok(CommandOutput {
-            stdout,
-            stderr,
-            success: exit_status == 0,
-        })
+        collect_channel_output(&mut channel).await
     }
+}
+
+/// Drain a channel's messages into a `CommandOutput`.
+async fn collect_channel_output(
+    channel: &mut russh::Channel<Msg>,
+) -> Result<CommandOutput, SshError> {
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+    let mut exit_status = 0u32;
+
+    loop {
+        match channel.wait().await {
+            Some(ChannelMsg::Data { data }) => stdout.extend_from_slice(&data),
+            Some(ChannelMsg::ExtendedData { data, ext: 1 }) => stderr.extend_from_slice(&data),
+            Some(ChannelMsg::ExitStatus { exit_status: code }) => exit_status = code,
+            None => break,
+            _ => {}
+        }
+    }
+
+    Ok(CommandOutput {
+        stdout,
+        stderr,
+        success: exit_status == 0,
+    })
 }
 
 /// Try ssh-agent first, then IdentityFile from config, then default key locations.

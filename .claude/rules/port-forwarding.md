@@ -48,7 +48,7 @@ Pressing `Enter`/`f` on an inactive forward sends `ForwardCommand::Stop`, removi
 
 ## Desktop notifications
 
-`notify.rs` sends fire-and-forget notifications (via `notify-rust`) when ports change between scans. Change detection is in `update()` `ScanReceived` handler using `model.prev_scan_ports` diff. First scan is skipped (no baseline). Controlled by `model.notifications_enabled` (CLI flag `--no-notify`). On macOS, the icon is set to Terminal.app via `set_application("com.apple.Terminal")`; on Linux, uses `utilities-terminal` freedesktop icon.
+`notify.rs` sends fire-and-forget notifications (via `notify-rust`) when ports change between scans. Change detection lives in `notify::detect_port_changes()`, called from `app::update()` on each `ScanReceived`. Uses `model.prev_scan_ports` diff; first scan is skipped (no baseline). Controlled by `model.notifications_enabled` (CLI flag `--no-notify`). On macOS, the icon is set to Terminal.app via `set_application("com.apple.Terminal")`; on Linux, uses `utilities-terminal` freedesktop icon.
 
 ## Adding a new ForwardCommand
 
