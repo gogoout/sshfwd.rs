@@ -79,19 +79,13 @@ pub fn detect_port_changes(
 /// Batches port change notifications across scans, flushing after a quiet period.
 const NOTIFY_DEBOUNCE_SECS: u64 = 2;
 
+#[derive(Default)]
 pub struct NotifyBatch {
     pending: Vec<PortChange>,
     last_change_at: Option<Instant>,
 }
 
 impl NotifyBatch {
-    pub fn new() -> Self {
-        Self {
-            pending: Vec::new(),
-            last_change_at: None,
-        }
-    }
-
     /// Add new changes to the pending batch.
     pub fn extend(&mut self, changes: Vec<PortChange>) {
         if !changes.is_empty() {

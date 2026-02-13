@@ -87,7 +87,7 @@ impl Model {
             show_inactive_forwards: false,
             notifications_enabled: true,
             prev_scan_ports: None,
-            notify_batch: crate::notify::NotifyBatch::new(),
+            notify_batch: crate::notify::NotifyBatch::default(),
             table_state: ratatui::widgets::TableState::default(),
             table_content_area: None,
         }
