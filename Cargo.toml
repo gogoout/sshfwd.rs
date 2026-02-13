@@ -35,6 +35,9 @@ crossbeam-channel = "0.5"
 # Cryptography
 sha2 = "0.10"
 
+# Notifications
+notify-rust = "4"
+
 # Error handling
 thiserror = "2"
 

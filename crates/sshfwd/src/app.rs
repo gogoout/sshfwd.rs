@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -37,6 +37,8 @@ pub enum Message {
     StreamEnded,
     // Keyboard
     Key(KeyEvent),
+    // Mouse
+    Mouse(crossterm::event::MouseEvent),
     // Forwarding
     ForwardEvent(ForwardEvent),
     // Timer
@@ -58,6 +60,11 @@ pub struct Model {
     pub forwards: HashMap<u16, ForwardEntry>,
     pub modal: ModalState,
     pub started_at: Instant,
+    pub show_inactive_forwards: bool,
+    pub notifications_enabled: bool,
+    pub prev_scan_ports: Option<HashSet<u16>>,
+    pub table_state: ratatui::widgets::TableState,
+    pub table_content_area: Option<ratatui::layout::Rect>,
 }
 
 impl Model {
@@ -76,6 +83,11 @@ impl Model {
             forwards: HashMap::new(),
             modal: ModalState::None,
             started_at: Instant::now(),
+            show_inactive_forwards: false,
+            notifications_enabled: true,
+            prev_scan_ports: None,
+            table_state: ratatui::widgets::TableState::default(),
+            table_content_area: None,
         }
     }
 
@@ -83,6 +95,7 @@ impl Model {
         let display_rows = build_display_rows(self);
         match display_rows.get(self.selected_index) {
             Some(DisplayRow::Port(i)) => Some(self.ports[*i].port),
+            Some(DisplayRow::InactiveForward(rp)) => Some(*rp),
             _ => None,
         }
     }
@@ -103,21 +116,22 @@ fn adjust_selection(model: &mut Model, target_port: Option<u16>) {
         return;
     }
     if let Some(port) = target_port {
-        if let Some(pos) = display_rows
-            .iter()
-            .position(|dr| matches!(dr, DisplayRow::Port(i) if model.ports[*i].port == port))
-        {
+        if let Some(pos) = display_rows.iter().position(|dr| match dr {
+            DisplayRow::Port(i) => model.ports[*i].port == port,
+            DisplayRow::InactiveForward(rp) => *rp == port,
+            DisplayRow::Separator => false,
+        }) {
             model.selected_index = pos;
             return;
         }
     }
-    // Clamp to last port row
-    let last_port = display_rows
+    // Clamp to last selectable row
+    let last_selectable = display_rows
         .iter()
-        .rposition(|dr| matches!(dr, DisplayRow::Port(_)))
+        .rposition(|dr| matches!(dr, DisplayRow::Port(_) | DisplayRow::InactiveForward(_)))
         .unwrap_or(0);
-    if model.selected_index > last_port {
-        model.selected_index = last_port;
+    if model.selected_index > last_selectable {
+        model.selected_index = last_selectable;
     }
     if matches!(
         display_rows.get(model.selected_index),
@@ -162,8 +176,7 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<ForwardCommand> {
             });
 
             // Reconcile forwards with current scan
-            let current_remote_ports: std::collections::HashSet<u16> =
-                ports.iter().map(|p| p.port).collect();
+            let current_remote_ports: HashSet<u16> = ports.iter().map(|p| p.port).collect();
 
             for (&remote_port, entry) in &model.forwards {
                 match entry.status {
@@ -201,12 +214,63 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<ForwardCommand> {
                 }
             }
 
+            // Detect port changes for notifications
+            let new_scan_ports: HashSet<u16> = current_remote_ports;
+            let mut port_changes = Vec::new();
+            if let Some(ref prev) = model.prev_scan_ports {
+                // New ports
+                for &port in &new_scan_ports {
+                    if !prev.contains(&port) {
+                        let kind = if model
+                            .forwards
+                            .get(&port)
+                            .is_some_and(|e| e.status == ForwardStatus::Starting)
+                        {
+                            crate::notify::PortChangeKind::Reactivated
+                        } else {
+                            crate::notify::PortChangeKind::Appeared
+                        };
+                        let process_name = ports
+                            .iter()
+                            .find(|p| p.port == port)
+                            .and_then(|p| p.process.as_ref())
+                            .map(|p| p.cmdline.clone());
+                        port_changes.push(crate::notify::PortChange {
+                            port,
+                            kind,
+                            process_name,
+                        });
+                    }
+                }
+                // Disappeared ports
+                for &port in prev {
+                    if !new_scan_ports.contains(&port) {
+                        let process_name = model
+                            .ports
+                            .iter()
+                            .find(|p| p.port == port)
+                            .and_then(|p| p.process.as_ref())
+                            .map(|p| p.cmdline.clone());
+                        port_changes.push(crate::notify::PortChange {
+                            port,
+                            kind: crate::notify::PortChangeKind::Disappeared,
+                            process_name,
+                        });
+                    }
+                }
+            }
+            model.prev_scan_ports = Some(new_scan_ports);
+
             if ports != model.ports {
                 model.ports = ports;
                 adjust_selection(model, prev_selected);
                 model.needs_render = true;
             } else if was_connecting || !commands.is_empty() {
                 model.needs_render = true;
+            }
+
+            if model.notifications_enabled && !port_changes.is_empty() {
+                crate::notify::notify_port_changes(&model.destination, &port_changes);
             }
         }
         Message::DiscoveryWarning(_) => {}
@@ -293,6 +357,56 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<ForwardCommand> {
         Message::Resize(_, _) => {
             model.needs_render = true;
         }
+        Message::Mouse(mouse) => {
+            if model.modal == ModalState::None {
+                use crossterm::event::{MouseButton, MouseEventKind};
+                match mouse.kind {
+                    MouseEventKind::ScrollUp => {
+                        let display_rows = build_display_rows(model);
+                        if model.selected_index > 0 {
+                            let prev = model.selected_index - 1;
+                            model.selected_index =
+                                if matches!(display_rows.get(prev), Some(DisplayRow::Separator)) {
+                                    prev.saturating_sub(1)
+                                } else {
+                                    prev
+                                };
+                            model.needs_render = true;
+                        }
+                    }
+                    MouseEventKind::ScrollDown => {
+                        let display_rows = build_display_rows(model);
+                        let last = display_rows.len().saturating_sub(1);
+                        if model.selected_index < last {
+                            let next = model.selected_index + 1;
+                            model.selected_index =
+                                if matches!(display_rows.get(next), Some(DisplayRow::Separator)) {
+                                    (next + 1).min(last)
+                                } else {
+                                    next
+                                };
+                            model.needs_render = true;
+                        }
+                    }
+                    MouseEventKind::Down(MouseButton::Left) => {
+                        if let Some(content) = model.table_content_area {
+                            if mouse.row >= content.y && mouse.row < content.y + content.height {
+                                let visual_row = (mouse.row - content.y) as usize;
+                                let display_idx = model.table_state.offset() + visual_row;
+                                let display_rows = build_display_rows(model);
+                                if display_idx < display_rows.len()
+                                    && !matches!(display_rows[display_idx], DisplayRow::Separator)
+                                {
+                                    model.selected_index = display_idx;
+                                    model.needs_render = true;
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
     }
 
     commands
@@ -345,13 +459,18 @@ fn handle_normal_key(model: &mut Model, key: KeyEvent) -> Vec<ForwardCommand> {
             let display_rows = build_display_rows(model);
             if let Some(last) = display_rows
                 .iter()
-                .rposition(|dr| matches!(dr, DisplayRow::Port(_)))
+                .rposition(|dr| matches!(dr, DisplayRow::Port(_) | DisplayRow::InactiveForward(_)))
             {
                 if model.selected_index != last {
                     model.selected_index = last;
                     model.needs_render = true;
                 }
             }
+        }
+        KeyCode::Char('p') => {
+            model.show_inactive_forwards = !model.show_inactive_forwards;
+            adjust_selection(model, model.selected_port());
+            model.needs_render = true;
         }
         KeyCode::Enter if key.modifiers.contains(KeyModifiers::SHIFT) => {
             if let Some(remote_port) = model.selected_port() {
@@ -502,7 +621,7 @@ fn save_forwards(model: &Model) {
     persistence::save_forwards(&model.destination, &forwards);
 }
 
-pub fn view(model: &Model, frame: &mut ratatui::Frame) {
+pub fn view(model: &mut Model, frame: &mut ratatui::Frame) {
     let areas = crate::ui::layout_areas(frame.area());
     crate::ui::table::render(model, frame, areas.table);
     crate::ui::hotkey_bar::render(model, frame, areas.hotkey_bar);

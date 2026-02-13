@@ -31,3 +31,4 @@ ratatui = { workspace = true, features = ["crossterm"] }
 crossterm = { workspace = true, features = ["use-dev-tty"] }
 crossbeam-channel = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
+notify-rust = { workspace = true }
