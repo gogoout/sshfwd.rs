@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use russh::client::{self, Msg};
 use russh::{ChannelMsg, ChannelStream};
+use tokio::sync::Mutex;
 
 use super::config;
 use crate::error::SshError;
@@ -16,8 +17,16 @@ pub struct CommandOutput {
     pub success: bool,
 }
 
-/// Minimal russh client handler — accepts all host keys.
-struct ClientHandler;
+/// An incoming reverse-forwarded connection from the SSH server.
+pub struct IncomingForward {
+    pub remote_port: u16,
+    pub channel: russh::Channel<russh::client::Msg>,
+}
+
+/// russh client handler — accepts all host keys and dispatches reverse-forward channels.
+struct ClientHandler {
+    forwarded_tx: Option<tokio::sync::mpsc::UnboundedSender<IncomingForward>>,
+}
 
 impl client::Handler for ClientHandler {
     type Error = russh::Error;
@@ -29,16 +38,35 @@ impl client::Handler for ClientHandler {
         // Accept all host keys (matches previous KnownHosts::Accept behavior)
         Ok(true)
     }
+
+    async fn server_channel_open_forwarded_tcpip(
+        &mut self,
+        channel: russh::Channel<russh::client::Msg>,
+        _connected_address: &str,
+        connected_port: u32,
+        _originator_address: &str,
+        _originator_port: u32,
+        _session: &mut russh::client::Session,
+    ) -> Result<(), Self::Error> {
+        if let Some(tx) = &self.forwarded_tx {
+            let _ = tx.send(IncomingForward {
+                remote_port: connected_port as u16,
+                channel,
+            });
+        }
+        Ok(())
+    }
 }
 
 /// SSH session backed by russh (pure Rust, zero child processes).
 ///
-/// Wrapped in `Arc` so the session can be shared between `AgentManager`
-/// (short-lived commands) and `DiscoveryStream` (keeps connection alive).
+/// Wrapped in `Arc<Mutex>` so the session can be shared between `AgentManager`
+/// (short-lived commands) and `DiscoveryStream` (keeps connection alive),
+/// and so `tcpip_forward` (&mut self) can be called through the shared handle.
 /// `_jump_session` keeps any ProxyJump hop alive for the connection's lifetime.
 #[derive(Clone)]
 pub struct Session {
-    handle: Arc<client::Handle<ClientHandler>>,
+    handle: Arc<Mutex<client::Handle<ClientHandler>>>,
     _jump_session: Option<Box<Session>>,
 }
 
@@ -47,8 +75,12 @@ impl Session {
     ///
     /// Handles ProxyJump by recursively connecting through jump hosts and
     /// tunneling via `channel_open_direct_tcpip`.
+    ///
+    /// `forwarded_tx` receives incoming reverse-forwarded connections from the server.
+    /// Pass `None` to disable reverse forwarding (e.g., for ProxyJump hops).
     pub fn connect(
         destination: &str,
+        forwarded_tx: Option<tokio::sync::mpsc::UnboundedSender<IncomingForward>>,
     ) -> Pin<Box<dyn Future<Output = Result<Self, SshError>> + Send + '_>> {
         Box::pin(async move {
             let (explicit_user, host) = config::parse_destination(destination);
@@ -61,14 +93,17 @@ impl Session {
             let resolved_port = cfg.port.unwrap_or(22);
 
             let (mut handle, jump_session) = if let Some(ref jump_dest) = cfg.proxy_jump {
-                // ProxyJump: connect through the jump host, then tunnel
-                let jump = Session::connect(jump_dest).await?;
+                // ProxyJump: connect through the jump host, then tunnel.
+                // Jump hops get None — only the final hop receives reverse forwards.
+                let jump = Session::connect(jump_dest, None).await?;
 
                 let target_host = resolved_host.clone();
                 let target_port = resolved_port as u32;
 
                 let channel = jump
                     .handle
+                    .lock()
+                    .await
                     .channel_open_direct_tcpip(target_host, target_port, "127.0.0.1", 0)
                     .await
                     .map_err(|e| SshError::Connection {
@@ -78,12 +113,13 @@ impl Session {
 
                 let tunnel = channel.into_stream();
                 let config = Arc::new(client::Config::default());
-                let handle = client::connect_stream(config, tunnel, ClientHandler)
-                    .await
-                    .map_err(|e| SshError::Connection {
-                        destination: destination.to_string(),
-                        source: e,
-                    })?;
+                let handle =
+                    client::connect_stream(config, tunnel, ClientHandler { forwarded_tx: None })
+                        .await
+                        .map_err(|e| SshError::Connection {
+                            destination: destination.to_string(),
+                            source: e,
+                        })?;
 
                 (handle, Some(Box::new(jump)))
             } else {
@@ -94,17 +130,23 @@ impl Session {
                     .map_err(|e| SshError::Config(format!("failed to connect to {addr}: {e}")))?;
 
                 let config = Arc::new(client::Config::default());
-                let handle = client::connect_stream(config, stream, ClientHandler)
-                    .await
-                    .map_err(|e| SshError::Connection {
-                        destination: destination.to_string(),
-                        source: e,
-                    })?;
+                let handle = client::connect_stream(
+                    config,
+                    stream,
+                    ClientHandler {
+                        forwarded_tx: forwarded_tx.clone(),
+                    },
+                )
+                .await
+                .map_err(|e| SshError::Connection {
+                    destination: destination.to_string(),
+                    source: e,
+                })?;
 
                 (handle, None)
             };
 
-            // Authenticate
+            // Authenticate with the raw handle before wrapping in Arc<Mutex>
             if !authenticate(&mut handle, &user, &cfg.identity_files).await? {
                 return Err(SshError::Auth {
                     destination: destination.to_string(),
@@ -115,7 +157,7 @@ impl Session {
             }
 
             Ok(Self {
-                handle: Arc::new(handle),
+                handle: Arc::new(Mutex::new(handle)),
                 _jump_session: jump_session,
             })
         })
@@ -129,6 +171,8 @@ impl Session {
     ) -> Result<ChannelStream<Msg>, SshError> {
         let channel = self
             .handle
+            .lock()
+            .await
             .channel_open_direct_tcpip(host.to_string(), port as u32, "127.0.0.1", 0)
             .await
             .map_err(SshError::Remote)?;
@@ -139,6 +183,8 @@ impl Session {
     pub async fn exec(&self, command: &str) -> Result<CommandOutput, SshError> {
         let mut channel = self
             .handle
+            .lock()
+            .await
             .channel_open_session()
             .await
             .map_err(SshError::Remote)?;
@@ -155,6 +201,8 @@ impl Session {
     pub async fn exec_streaming(&self, command: &str) -> Result<ChannelStream<Msg>, SshError> {
         let channel = self
             .handle
+            .lock()
+            .await
             .channel_open_session()
             .await
             .map_err(SshError::Remote)?;
@@ -173,6 +221,8 @@ impl Session {
     ) -> Result<CommandOutput, SshError> {
         let mut channel = self
             .handle
+            .lock()
+            .await
             .channel_open_session()
             .await
             .map_err(SshError::Remote)?;
@@ -184,6 +234,28 @@ impl Session {
         channel.eof().await.map_err(SshError::Remote)?;
 
         collect_channel_output(&mut channel).await
+    }
+
+    /// Request the SSH server to listen on the given port for reverse forwarding.
+    /// Returns the actual bound port (useful if 0 was passed for server-assigned port).
+    pub async fn tcpip_forward(&self, port: u16) -> Result<u16, SshError> {
+        self.handle
+            .lock()
+            .await
+            .tcpip_forward("127.0.0.1", port as u32)
+            .await
+            .map(|p| p as u16)
+            .map_err(SshError::Remote)
+    }
+
+    /// Cancel a previously requested remote port listening.
+    pub async fn cancel_tcpip_forward(&self, port: u16) -> Result<(), SshError> {
+        self.handle
+            .lock()
+            .await
+            .cancel_tcpip_forward("127.0.0.1", port as u32)
+            .await
+            .map_err(SshError::Remote)
     }
 }
 

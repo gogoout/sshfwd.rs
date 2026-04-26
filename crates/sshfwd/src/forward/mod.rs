@@ -8,7 +8,7 @@ use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 
-use crate::ssh::session::Session;
+use crate::ssh::session::{IncomingForward, Session};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub enum ForwardKind {
@@ -114,6 +114,9 @@ pub struct ForwardManager {
     cmd_rx: mpsc::UnboundedReceiver<ForwardCommand>,
     event_tx: crossbeam_channel::Sender<crate::app::Message>,
     listeners: HashMap<ForwardKey, ListenerHandle>,
+    forwarded_rx: tokio::sync::mpsc::UnboundedReceiver<IncomingForward>,
+    /// Maps remote_port → local_port for active reverse forwards.
+    reverse_map: HashMap<u16, u16>,
 }
 
 impl ForwardManager {
@@ -121,48 +124,95 @@ impl ForwardManager {
         session: Session,
         cmd_rx: mpsc::UnboundedReceiver<ForwardCommand>,
         event_tx: crossbeam_channel::Sender<crate::app::Message>,
+        forwarded_rx: tokio::sync::mpsc::UnboundedReceiver<IncomingForward>,
     ) -> Self {
         Self {
             session,
             cmd_rx,
             event_tx,
             listeners: HashMap::new(),
+            forwarded_rx,
+            reverse_map: HashMap::new(),
         }
     }
 
     pub async fn run(mut self) {
-        while let Some(cmd) = self.cmd_rx.recv().await {
-            match cmd {
-                ForwardCommand::Start {
-                    kind,
-                    remote_port,
-                    local_port,
-                    remote_host,
-                } => self.handle_start(ForwardKey { kind, remote_port }, local_port, remote_host),
-                ForwardCommand::Stop { kind, remote_port } => {
-                    self.handle_stop(ForwardKey { kind, remote_port });
+        loop {
+            tokio::select! {
+                cmd_opt = self.cmd_rx.recv() => {
+                    match cmd_opt {
+                        Some(cmd) => self.handle_command(cmd).await,
+                        None => break,
+                    }
                 }
-                ForwardCommand::Reactivate {
-                    kind,
-                    remote_port,
-                    local_port,
-                    remote_host,
-                } => {
-                    let key = ForwardKey { kind, remote_port };
-                    let port = self
-                        .listeners
-                        .get(&key)
-                        .map_or(local_port, |h| h.local_port);
-                    self.handle_start(key, port, remote_host);
-                }
-                ForwardCommand::Pause { kind, remote_port } => {
-                    self.handle_pause(ForwardKey { kind, remote_port });
+                inc_opt = self.forwarded_rx.recv() => {
+                    if let Some(inc) = inc_opt {
+                        self.handle_incoming(inc);
+                    }
                 }
             }
         }
     }
 
-    fn handle_start(&mut self, key: ForwardKey, local_port: u16, remote_host: String) {
+    async fn handle_command(&mut self, cmd: ForwardCommand) {
+        match cmd {
+            ForwardCommand::Start {
+                kind,
+                remote_port,
+                local_port,
+                remote_host,
+            } => {
+                let key = ForwardKey { kind, remote_port };
+                match kind {
+                    ForwardKind::Local => self.handle_start_local(key, local_port, remote_host),
+                    ForwardKind::Reverse => self.handle_start_reverse(key, local_port).await,
+                }
+            }
+            ForwardCommand::Stop { kind, remote_port } => {
+                let key = ForwardKey { kind, remote_port };
+                match kind {
+                    ForwardKind::Local => self.handle_stop_local(key),
+                    ForwardKind::Reverse => self.handle_stop_reverse(key).await,
+                }
+            }
+            ForwardCommand::Reactivate {
+                kind,
+                remote_port,
+                local_port,
+                remote_host,
+            } => {
+                let key = ForwardKey { kind, remote_port };
+                match kind {
+                    ForwardKind::Local => {
+                        let port = self
+                            .listeners
+                            .get(&key)
+                            .map_or(local_port, |h| h.local_port);
+                        self.handle_start_local(key, port, remote_host);
+                    }
+                    ForwardKind::Reverse => self.handle_start_reverse(key, local_port).await,
+                }
+            }
+            ForwardCommand::Pause { kind, remote_port } => {
+                let key = ForwardKey { kind, remote_port };
+                match kind {
+                    ForwardKind::Local => self.handle_pause_local(key),
+                    ForwardKind::Reverse => {
+                        // Reverse forwards don't pause (no scan-driven lifecycle).
+                        // Just emit Paused event.
+                        let _ = self.event_tx.send(crate::app::Message::ForwardEvent(
+                            ForwardEvent::Paused {
+                                kind: key.kind,
+                                remote_port: key.remote_port,
+                            },
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    fn handle_start_local(&mut self, key: ForwardKey, local_port: u16, remote_host: String) {
         // Stop existing listener if any
         if let Some(handle) = self.listeners.remove(&key) {
             handle.abort_handle.abort();
@@ -259,7 +309,7 @@ impl ForwardManager {
         );
     }
 
-    fn handle_stop(&mut self, key: ForwardKey) {
+    fn handle_stop_local(&mut self, key: ForwardKey) {
         if let Some(handle) = self.listeners.remove(&key) {
             handle.abort_handle.abort();
         }
@@ -271,7 +321,7 @@ impl ForwardManager {
             }));
     }
 
-    fn handle_pause(&mut self, key: ForwardKey) {
+    fn handle_pause_local(&mut self, key: ForwardKey) {
         if let Some(handle) = self.listeners.remove(&key) {
             handle.abort_handle.abort();
             // Re-insert without abort handle — just remember the port mapping
@@ -290,6 +340,79 @@ impl ForwardManager {
                 kind: key.kind,
                 remote_port: key.remote_port,
             }));
+    }
+
+    async fn handle_start_reverse(&mut self, key: ForwardKey, local_port: u16) {
+        let remote_port = key.remote_port;
+
+        match self.session.tcpip_forward(remote_port).await {
+            Ok(bound_port) => {
+                // bound_port may differ from remote_port if remote_port was 0
+                self.reverse_map.insert(bound_port, local_port);
+                let _ =
+                    self.event_tx
+                        .send(crate::app::Message::ForwardEvent(ForwardEvent::Started {
+                            kind: ForwardKind::Reverse,
+                            remote_port: bound_port,
+                            local_port,
+                        }));
+            }
+            Err(e) => {
+                let _ = self.event_tx.send(crate::app::Message::ForwardEvent(
+                    ForwardEvent::BindError {
+                        kind: ForwardKind::Reverse,
+                        remote_port,
+                        message: e.to_string(),
+                    },
+                ));
+            }
+        }
+    }
+
+    async fn handle_stop_reverse(&mut self, key: ForwardKey) {
+        let remote_port = key.remote_port;
+        self.reverse_map.remove(&remote_port);
+        // Best-effort cancel — don't fail the stop if the session is dead
+        let _ = self.session.cancel_tcpip_forward(remote_port).await;
+        let _ = self
+            .event_tx
+            .send(crate::app::Message::ForwardEvent(ForwardEvent::Stopped {
+                kind: ForwardKind::Reverse,
+                remote_port,
+            }));
+    }
+
+    fn handle_incoming(&self, inc: IncomingForward) {
+        let Some(&local_port) = self.reverse_map.get(&inc.remote_port) else {
+            return; // Unknown port — ignore
+        };
+
+        let event_tx = self.event_tx.clone();
+        let remote_port = inc.remote_port;
+
+        tokio::spawn(async move {
+            // Connect to the local target service
+            let local_stream = match tokio::net::TcpStream::connect(("127.0.0.1", local_port)).await
+            {
+                Ok(s) => s,
+                Err(_) => return,
+            };
+
+            // Get the channel stream from the russh Channel
+            let channel_stream = inc.channel.into_stream();
+
+            // Bidirectional copy
+            let (mut ssh_r, mut ssh_w) = tokio::io::split(channel_stream);
+            let (mut local_r, mut local_w) = tokio::io::split(local_stream);
+            tokio::select! {
+                _ = tokio::io::copy(&mut local_r, &mut ssh_w) => {}
+                _ = tokio::io::copy(&mut ssh_r, &mut local_w) => {}
+            }
+
+            // Keep event_tx alive for potential future connection count tracking
+            let _ = event_tx;
+            let _ = remote_port;
+        });
     }
 }
 
