@@ -4,7 +4,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Paragraph, Row, Table};
 use ratatui::Frame;
 
-use crate::app::{ConnectionState, Model};
+use crate::app::{AppMode, ConnectionState, Model};
 use crate::forward::{ForwardKey, ForwardKind, ForwardStatus};
 use crate::ui::header;
 
@@ -26,12 +26,21 @@ const SELECTED_STYLE: Style = Style::new()
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum DisplayRow {
-    Port(usize),          // index into model.ports
-    InactiveForward(u16), // remote port of a paused forward not in current scan
+    Port(usize),                 // index into model.ports (Forward mode)
+    LocalPort(usize),            // index into model.local_ports (Reverse mode)
+    InactiveForward(u16),        // remote port of a paused local forward not in current scan
+    InactiveReverseForward(u16), // local port of a paused reverse forward not in local scan
     Separator,
 }
 
 pub fn build_display_rows(model: &Model) -> Vec<DisplayRow> {
+    match model.mode {
+        AppMode::Forward => build_forward_rows(model),
+        AppMode::Reverse => build_reverse_rows(model),
+    }
+}
+
+fn build_forward_rows(model: &Model) -> Vec<DisplayRow> {
     let scan_ports: std::collections::HashSet<u16> = model.ports.iter().map(|p| p.port).collect();
 
     let mut forwarded = Vec::new();
@@ -78,6 +87,51 @@ pub fn build_display_rows(model: &Model) -> Vec<DisplayRow> {
     rows
 }
 
+fn build_reverse_rows(model: &Model) -> Vec<DisplayRow> {
+    let local_scan_ports: std::collections::HashSet<u16> =
+        model.local_ports.iter().map(|p| p.port).collect();
+
+    let mut reverse_forwarded = Vec::new();
+    let mut non_reverse_forwarded = Vec::new();
+
+    for (i, port) in model.local_ports.iter().enumerate() {
+        let reverse_key = ForwardKey {
+            kind: ForwardKind::Reverse,
+            remote_port: port.port,
+        };
+        if model.forwards.contains_key(&reverse_key) {
+            reverse_forwarded.push((port.port, DisplayRow::LocalPort(i)));
+        } else {
+            non_reverse_forwarded.push(DisplayRow::LocalPort(i));
+        }
+    }
+
+    // Merge inactive reverse forwards (paused, whose local port is not in local scan)
+    if model.show_inactive_forwards {
+        for (key, entry) in &model.forwards {
+            if key.kind == ForwardKind::Reverse
+                && entry.status == ForwardStatus::Paused
+                && !local_scan_ports.contains(&entry.local_port)
+            {
+                reverse_forwarded.push((
+                    entry.local_port,
+                    DisplayRow::InactiveReverseForward(key.remote_port),
+                ));
+            }
+        }
+    }
+    reverse_forwarded.sort_by_key(|(port, _)| *port);
+
+    let has_top = !reverse_forwarded.is_empty();
+    let mut rows = Vec::with_capacity(reverse_forwarded.len() + 1 + non_reverse_forwarded.len());
+    rows.extend(reverse_forwarded.into_iter().map(|(_, dr)| dr));
+    if has_top && !non_reverse_forwarded.is_empty() {
+        rows.push(DisplayRow::Separator);
+    }
+    rows.extend(non_reverse_forwarded);
+    rows
+}
+
 pub fn render(model: &mut Model, frame: &mut Frame, area: Rect) {
     let title = header::build_title(model);
 
@@ -86,7 +140,13 @@ pub fn render(model: &mut Model, frame: &mut Frame, area: Rect) {
         .border_style(Style::default().fg(Color::DarkGray))
         .title(title);
 
-    if model.ports.is_empty() || model.started_at.elapsed().as_secs() < 1 {
+    let show_splash = match model.mode {
+        AppMode::Forward => model.ports.is_empty() || model.started_at.elapsed().as_secs() < 1,
+        AppMode::Reverse => {
+            model.local_ports.is_empty() && model.started_at.elapsed().as_secs() < 1
+        }
+    };
+    if show_splash {
         render_splash(model, frame, area, block);
         return;
     }
@@ -112,7 +172,18 @@ pub fn render(model: &mut Model, frame: &mut Frame, area: Rect) {
         .map(|dr| match dr {
             DisplayRow::Port(i) => {
                 let port = &model.ports[*i];
-                let fwd_cell = format_fwd(model, port.port);
+                let fwd_cell = format_local_fwd(model, port.port);
+                let proto = format!("{:?}", port.protocol).to_lowercase();
+                let (pid, cmd) = match &port.process {
+                    Some(p) => (format!("{}", p.pid), p.cmdline.clone()),
+                    None => ("-".to_string(), "-".to_string()),
+                };
+                Row::new([fwd_cell.0, format!("{}", port.port), proto, pid, cmd])
+                    .style(fwd_cell.1.unwrap_or_default())
+            }
+            DisplayRow::LocalPort(i) => {
+                let port = &model.local_ports[*i];
+                let fwd_cell = format_reverse_fwd(model, port.port);
                 let proto = format!("{:?}", port.protocol).to_lowercase();
                 let (pid, cmd) = match &port.process {
                     Some(p) => (format!("{}", p.pid), p.cmdline.clone()),
@@ -129,6 +200,22 @@ pub fn render(model: &mut Model, frame: &mut Frame, area: Rect) {
                 Row::new([
                     format!("||:{}", local_port),
                     format!("{}", remote_port),
+                    "-".to_string(),
+                    "-".to_string(),
+                    "(inactive)".to_string(),
+                ])
+                .style(inactive_style)
+            }
+            DisplayRow::InactiveReverseForward(remote_port) => {
+                // remote_port is the ForwardKey's remote_port (the remote bind port)
+                let entry = model.forwards.get(&ForwardKey {
+                    kind: ForwardKind::Reverse,
+                    remote_port: *remote_port,
+                });
+                let local_port = entry.map_or(*remote_port, |e| e.local_port);
+                Row::new([
+                    format!("||<-:{}", remote_port),
+                    format!("{}", local_port),
                     "-".to_string(),
                     "-".to_string(),
                     "(inactive)".to_string(),
@@ -211,8 +298,8 @@ fn render_splash(model: &Model, frame: &mut Frame, area: Rect, block: Block) {
     frame.render_widget(paragraph, content_area);
 }
 
-/// Returns (display_text, optional_style_override) for the FWD column.
-fn format_fwd(model: &Model, remote_port: u16) -> (String, Option<Style>) {
+/// Returns (display_text, optional_style_override) for the FWD column — local forward mode.
+fn format_local_fwd(model: &Model, remote_port: u16) -> (String, Option<Style>) {
     match model.forwards.get(&ForwardKey::local(remote_port)) {
         Some(entry) => match &entry.status {
             ForwardStatus::Active => (
@@ -221,6 +308,31 @@ fn format_fwd(model: &Model, remote_port: u16) -> (String, Option<Style>) {
             ),
             ForwardStatus::Paused => (
                 format!("||:{}", entry.local_port),
+                Some(Style::default().fg(Color::Yellow)),
+            ),
+            ForwardStatus::Starting => {
+                ("...".to_string(), Some(Style::default().fg(Color::Yellow)))
+            }
+        },
+        None => (String::new(), None),
+    }
+}
+
+/// Returns (display_text, optional_style_override) for the FWD column — reverse forward mode.
+/// `local_port` is the local port from the scan; we look up a Reverse forward keyed by it.
+fn format_reverse_fwd(model: &Model, local_port: u16) -> (String, Option<Style>) {
+    let reverse_key = ForwardKey {
+        kind: ForwardKind::Reverse,
+        remote_port: local_port,
+    };
+    match model.forwards.get(&reverse_key) {
+        Some(entry) => match &entry.status {
+            ForwardStatus::Active => (
+                format!("<-:{}", reverse_key.remote_port),
+                Some(Style::default().fg(Color::Green)),
+            ),
+            ForwardStatus::Paused => (
+                format!("||<-:{}", reverse_key.remote_port),
                 Some(Style::default().fg(Color::Yellow)),
             ),
             ForwardStatus::Starting => {

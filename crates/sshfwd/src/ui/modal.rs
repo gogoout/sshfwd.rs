@@ -6,10 +6,13 @@ use ratatui::Frame;
 
 use super::hotkey_spans;
 use crate::app::{ModalState, Model};
+use crate::forward::ForwardKind;
 
 pub fn render(model: &Model, frame: &mut Frame) {
     let ModalState::PortInput {
+        kind,
         remote_port,
+        local_port,
         buffer,
         error,
         ..
@@ -18,14 +21,26 @@ pub fn render(model: &Model, frame: &mut Frame) {
         return;
     };
 
-    let area = centered_rect(40, 7, frame.area());
+    let area = centered_rect(44, 7, frame.area());
 
     frame.render_widget(Clear, area);
 
-    let title = format!(" Forward port {} ", remote_port);
+    let (title, label, border_color) = match kind {
+        ForwardKind::Local => (
+            format!(" Forward port :{} ", remote_port),
+            "Local port: ",
+            Color::Cyan,
+        ),
+        ForwardKind::Reverse => (
+            format!(" Reverse :{} → remote ", local_port),
+            "Remote bind port: ",
+            Color::Magenta,
+        ),
+    };
+
     let block = Block::bordered()
         .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(Color::Cyan))
+        .border_style(Style::default().fg(border_color))
         .title(title);
 
     let inner = block.inner(area);
@@ -44,7 +59,7 @@ pub fn render(model: &Model, frame: &mut Frame) {
     }
 
     lines.push(Line::from(vec![
-        Span::raw("  Local port: "),
+        Span::raw(format!("  {}", label)),
         Span::styled(
             format!("{}\u{2588}", buffer),
             Style::default()

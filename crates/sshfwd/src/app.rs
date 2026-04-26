@@ -19,11 +19,20 @@ pub enum ConnectionState {
     Disconnected,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AppMode {
+    #[default]
+    Forward,
+    Reverse,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ModalState {
     None,
     PortInput {
+        kind: ForwardKind,
         remote_port: u16,
+        local_port: u16,
         buffer: String,
         remote_host: String,
         error: Option<String>,
@@ -65,6 +74,7 @@ pub struct Model {
     pub needs_render: bool,
     pub forwards: HashMap<ForwardKey, ForwardEntry>,
     pub modal: ModalState,
+    pub mode: AppMode,
     pub started_at: Instant,
     pub show_inactive_forwards: bool,
     pub notifications_enabled: bool,
@@ -90,6 +100,7 @@ impl Model {
             needs_render: true,
             forwards: HashMap::new(),
             modal: ModalState::None,
+            mode: AppMode::Forward,
             started_at: Instant::now(),
             show_inactive_forwards: false,
             notifications_enabled: true,
@@ -104,7 +115,9 @@ impl Model {
         let display_rows = build_display_rows(self);
         match display_rows.get(self.selected_index) {
             Some(DisplayRow::Port(i)) => Some(self.ports[*i].port),
+            Some(DisplayRow::LocalPort(i)) => Some(self.local_ports[*i].port),
             Some(DisplayRow::InactiveForward(rp)) => Some(*rp),
+            Some(DisplayRow::InactiveReverseForward(rp)) => Some(*rp),
             _ => None,
         }
     }
@@ -156,7 +169,9 @@ fn adjust_selection(model: &mut Model, target_port: Option<u16>) {
     if let Some(port) = target_port {
         if let Some(pos) = display_rows.iter().position(|dr| match dr {
             DisplayRow::Port(i) => model.ports[*i].port == port,
+            DisplayRow::LocalPort(i) => model.local_ports[*i].port == port,
             DisplayRow::InactiveForward(rp) => *rp == port,
+            DisplayRow::InactiveReverseForward(rp) => *rp == port,
             DisplayRow::Separator => false,
         }) {
             model.selected_index = pos;
@@ -166,7 +181,15 @@ fn adjust_selection(model: &mut Model, target_port: Option<u16>) {
     // Clamp to last selectable row
     let last_selectable = display_rows
         .iter()
-        .rposition(|dr| matches!(dr, DisplayRow::Port(_) | DisplayRow::InactiveForward(_)))
+        .rposition(|dr| {
+            matches!(
+                dr,
+                DisplayRow::Port(_)
+                    | DisplayRow::LocalPort(_)
+                    | DisplayRow::InactiveForward(_)
+                    | DisplayRow::InactiveReverseForward(_)
+            )
+        })
         .unwrap_or(0);
     if model.selected_index > last_selectable {
         model.selected_index = last_selectable;
@@ -257,6 +280,7 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<ForwardCommand> {
         }
         Message::LocalScanReceived(scan) => {
             model.local_ports = scan.ports;
+            model.needs_render = true;
         }
         Message::LocalScanError(_) => {
             // Silently ignore local scan errors for now
@@ -297,16 +321,22 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<ForwardCommand> {
                     remote_port,
                     message,
                 } => {
-                    let local_port_str = model
+                    let failed_local_port = model
                         .forwards
                         .get(&ForwardKey { kind, remote_port })
-                        .map(|e| format!("{}", e.local_port))
-                        .unwrap_or_else(|| format!("{}", remote_port));
+                        .map(|e| e.local_port)
+                        .unwrap_or(remote_port);
                     model.forwards.remove(&ForwardKey { kind, remote_port });
                     model.modal = ModalState::PortInput {
+                        kind,
                         remote_port,
-                        buffer: local_port_str,
-                        remote_host: model.remote_host(),
+                        local_port: failed_local_port,
+                        buffer: format!("{}", failed_local_port),
+                        remote_host: if kind == ForwardKind::Reverse {
+                            "127.0.0.1".to_string()
+                        } else {
+                            model.remote_host()
+                        },
                         error: Some(message),
                     };
                     adjust_selection(model, Some(remote_port));
@@ -400,15 +430,28 @@ fn handle_normal_key(model: &mut Model, key: KeyEvent) -> Vec<ForwardCommand> {
         }
         KeyCode::Char('G') => {
             let display_rows = build_display_rows(model);
-            if let Some(last) = display_rows
-                .iter()
-                .rposition(|dr| matches!(dr, DisplayRow::Port(_) | DisplayRow::InactiveForward(_)))
-            {
+            if let Some(last) = display_rows.iter().rposition(|dr| {
+                matches!(
+                    dr,
+                    DisplayRow::Port(_)
+                        | DisplayRow::LocalPort(_)
+                        | DisplayRow::InactiveForward(_)
+                        | DisplayRow::InactiveReverseForward(_)
+                )
+            }) {
                 if model.selected_index != last {
                     model.selected_index = last;
                     model.needs_render = true;
                 }
             }
+        }
+        KeyCode::Char('m') => {
+            model.mode = match model.mode {
+                AppMode::Forward => AppMode::Reverse,
+                AppMode::Reverse => AppMode::Forward,
+            };
+            model.selected_index = 0;
+            model.needs_render = true;
         }
         KeyCode::Char('p') => {
             let selected_port = model.selected_port();
@@ -417,35 +460,22 @@ fn handle_normal_key(model: &mut Model, key: KeyEvent) -> Vec<ForwardCommand> {
             model.needs_render = true;
         }
         KeyCode::Enter if key.modifiers.contains(KeyModifiers::SHIFT) => {
-            open_port_modal(model);
-        }
-        KeyCode::Enter | KeyCode::Char('f') => {
-            if let Some(remote_port) = model.selected_port() {
-                let key = ForwardKey::local(remote_port);
-                if let std::collections::hash_map::Entry::Vacant(e) = model.forwards.entry(key) {
-                    e.insert(ForwardEntry {
-                        local_port: remote_port,
-                        status: ForwardStatus::Starting,
-                        active_connections: 0,
-                    });
-                    commands.push(ForwardCommand::Start {
-                        kind: ForwardKind::Local,
-                        remote_port,
-                        local_port: remote_port,
-                        remote_host: model.remote_host(),
-                    });
-                    adjust_selection(model, Some(remote_port));
-                    model.needs_render = true;
-                } else {
-                    commands.push(ForwardCommand::Stop {
-                        kind: ForwardKind::Local,
-                        remote_port,
-                    });
-                }
+            if model.mode == AppMode::Forward {
+                open_local_forward_modal(model);
             }
         }
+        KeyCode::Enter | KeyCode::Char('f') => match model.mode {
+            AppMode::Forward => {
+                commands = handle_forward_action(model);
+            }
+            AppMode::Reverse => {
+                commands = open_reverse_modal(model);
+            }
+        },
         KeyCode::Char('F') => {
-            open_port_modal(model);
+            if model.mode == AppMode::Forward {
+                open_local_forward_modal(model);
+            }
         }
         _ => {}
     }
@@ -453,11 +483,41 @@ fn handle_normal_key(model: &mut Model, key: KeyEvent) -> Vec<ForwardCommand> {
     commands
 }
 
-fn open_port_modal(model: &mut Model) {
+fn handle_forward_action(model: &mut Model) -> Vec<ForwardCommand> {
+    let mut commands = Vec::new();
+    if let Some(remote_port) = model.selected_port() {
+        let key = ForwardKey::local(remote_port);
+        if let std::collections::hash_map::Entry::Vacant(e) = model.forwards.entry(key) {
+            e.insert(ForwardEntry {
+                local_port: remote_port,
+                status: ForwardStatus::Starting,
+                active_connections: 0,
+            });
+            commands.push(ForwardCommand::Start {
+                kind: ForwardKind::Local,
+                remote_port,
+                local_port: remote_port,
+                remote_host: model.remote_host(),
+            });
+            adjust_selection(model, Some(remote_port));
+            model.needs_render = true;
+        } else {
+            commands.push(ForwardCommand::Stop {
+                kind: ForwardKind::Local,
+                remote_port,
+            });
+        }
+    }
+    commands
+}
+
+fn open_local_forward_modal(model: &mut Model) {
     if let Some(remote_port) = model.selected_port() {
         if !model.forwards.contains_key(&ForwardKey::local(remote_port)) {
             model.modal = ModalState::PortInput {
+                kind: ForwardKind::Local,
                 remote_port,
+                local_port: remote_port,
                 buffer: format!("{}", remote_port),
                 remote_host: model.remote_host(),
                 error: None,
@@ -467,16 +527,59 @@ fn open_port_modal(model: &mut Model) {
     }
 }
 
+fn open_reverse_modal(model: &mut Model) -> Vec<ForwardCommand> {
+    let mut commands = Vec::new();
+    let display_rows = build_display_rows(model);
+    match display_rows.get(model.selected_index) {
+        Some(DisplayRow::InactiveReverseForward(rp)) => {
+            // Pressing Enter on an inactive reverse forward stops it (removes persistence)
+            let remote_port = *rp;
+            commands.push(ForwardCommand::Stop {
+                kind: ForwardKind::Reverse,
+                remote_port,
+            });
+        }
+        Some(DisplayRow::LocalPort(i)) => {
+            let local_port = model.local_ports[*i].port;
+            let reverse_key = ForwardKey {
+                kind: ForwardKind::Reverse,
+                remote_port: local_port,
+            };
+            if !model.forwards.contains_key(&reverse_key) {
+                model.modal = ModalState::PortInput {
+                    kind: ForwardKind::Reverse,
+                    remote_port: local_port,
+                    local_port,
+                    buffer: format!("{}", local_port),
+                    remote_host: "127.0.0.1".to_string(),
+                    error: None,
+                };
+                model.needs_render = true;
+            }
+        }
+        _ => {}
+    }
+    commands
+}
+
 fn handle_port_input_key(model: &mut Model, key: KeyEvent) -> Vec<ForwardCommand> {
     let mut commands = Vec::new();
 
-    let (remote_port, remote_host, buffer) = match &model.modal {
+    let (kind, remote_port, local_port, remote_host, buffer) = match &model.modal {
         ModalState::PortInput {
+            kind,
             remote_port,
+            local_port,
             remote_host,
             buffer,
             ..
-        } => (*remote_port, remote_host.clone(), buffer.clone()),
+        } => (
+            *kind,
+            *remote_port,
+            *local_port,
+            remote_host.clone(),
+            buffer.clone(),
+        ),
         ModalState::None => return commands,
     };
 
@@ -486,30 +589,61 @@ fn handle_port_input_key(model: &mut Model, key: KeyEvent) -> Vec<ForwardCommand
             model.needs_render = true;
         }
         KeyCode::Enter => {
-            if let Ok(local_port) = buffer.parse::<u16>() {
-                if local_port > 0 {
-                    let key = ForwardKey::local(remote_port);
-                    // Stop existing forward if any
-                    if model.forwards.contains_key(&key) {
-                        commands.push(ForwardCommand::Stop {
-                            kind: ForwardKind::Local,
-                            remote_port,
-                        });
+            if let Ok(parsed_port) = buffer.parse::<u16>() {
+                if parsed_port > 0 {
+                    match kind {
+                        ForwardKind::Local => {
+                            let fwd_key = ForwardKey::local(remote_port);
+                            if model.forwards.contains_key(&fwd_key) {
+                                commands.push(ForwardCommand::Stop {
+                                    kind: ForwardKind::Local,
+                                    remote_port,
+                                });
+                            }
+                            model.forwards.insert(
+                                fwd_key,
+                                ForwardEntry {
+                                    local_port: parsed_port,
+                                    status: ForwardStatus::Starting,
+                                    active_connections: 0,
+                                },
+                            );
+                            commands.push(ForwardCommand::Start {
+                                kind: ForwardKind::Local,
+                                remote_port,
+                                local_port: parsed_port,
+                                remote_host,
+                            });
+                        }
+                        ForwardKind::Reverse => {
+                            // buffer holds the remote bind port; local_port is fixed
+                            let remote_bind_port = parsed_port;
+                            let fwd_key = ForwardKey {
+                                kind: ForwardKind::Reverse,
+                                remote_port: remote_bind_port,
+                            };
+                            if model.forwards.contains_key(&fwd_key) {
+                                commands.push(ForwardCommand::Stop {
+                                    kind: ForwardKind::Reverse,
+                                    remote_port: remote_bind_port,
+                                });
+                            }
+                            model.forwards.insert(
+                                fwd_key,
+                                ForwardEntry {
+                                    local_port,
+                                    status: ForwardStatus::Starting,
+                                    active_connections: 0,
+                                },
+                            );
+                            commands.push(ForwardCommand::Start {
+                                kind: ForwardKind::Reverse,
+                                remote_port: remote_bind_port,
+                                local_port,
+                                remote_host,
+                            });
+                        }
                     }
-                    model.forwards.insert(
-                        key,
-                        ForwardEntry {
-                            local_port,
-                            status: ForwardStatus::Starting,
-                            active_connections: 0,
-                        },
-                    );
-                    commands.push(ForwardCommand::Start {
-                        kind: ForwardKind::Local,
-                        remote_port,
-                        local_port,
-                        remote_host,
-                    });
                 }
             }
             model.modal = ModalState::None;
@@ -521,7 +655,9 @@ fn handle_port_input_key(model: &mut Model, key: KeyEvent) -> Vec<ForwardCommand
             if new_buffer.len() < 5 {
                 new_buffer.push(c);
                 model.modal = ModalState::PortInput {
+                    kind,
                     remote_port,
+                    local_port,
                     buffer: new_buffer,
                     remote_host,
                     error: None,
@@ -533,7 +669,9 @@ fn handle_port_input_key(model: &mut Model, key: KeyEvent) -> Vec<ForwardCommand
             let mut new_buffer = buffer;
             new_buffer.pop();
             model.modal = ModalState::PortInput {
+                kind,
                 remote_port,
+                local_port,
                 buffer: new_buffer,
                 remote_host,
                 error: None,
