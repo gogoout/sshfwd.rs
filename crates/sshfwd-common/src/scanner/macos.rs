@@ -1,4 +1,4 @@
-use sshfwd_common::types::{AgentError, ScanResult};
+use crate::types::{AgentError, ScanResult};
 
 use super::Scanner;
 
@@ -9,6 +9,12 @@ pub struct MacosScanner {
 impl MacosScanner {
     pub fn new() -> Self {
         Self { scan_index: 0 }
+    }
+}
+
+impl Default for MacosScanner {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

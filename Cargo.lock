@@ -2942,7 +2942,6 @@ dependencies = [
 name = "sshfwd-agent"
 version = "0.2.0"
 dependencies = [
- "libc",
  "serde_json",
  "sshfwd-common",
 ]
@@ -2951,6 +2950,7 @@ dependencies = [
 name = "sshfwd-common"
 version = "0.2.0"
 dependencies = [
+ "libc",
  "serde",
  "serde_json",
 ]

@@ -1,9 +1,7 @@
 use std::collections::HashMap;
 use std::fs;
 
-use sshfwd_common::types::{
-    AgentError, AgentErrorKind, ListeningPort, ProcessInfo, Protocol, ScanResult,
-};
+use crate::types::{AgentError, AgentErrorKind, ListeningPort, ProcessInfo, Protocol, ScanResult};
 
 use super::proc_net_tcp::{dedup_entries, parse_proc_net_tcp};
 use super::Scanner;
@@ -15,6 +13,12 @@ pub struct LinuxScanner {
 impl LinuxScanner {
     pub fn new() -> Self {
         Self { scan_index: 0 }
+    }
+}
+
+impl Default for LinuxScanner {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
