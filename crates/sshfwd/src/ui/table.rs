@@ -5,7 +5,7 @@ use ratatui::widgets::{Block, BorderType, Paragraph, Row, Table};
 use ratatui::Frame;
 
 use crate::app::{ConnectionState, Model};
-use crate::forward::ForwardStatus;
+use crate::forward::{ForwardKey, ForwardKind, ForwardStatus};
 use crate::ui::header;
 
 const LOGO: &[&str] = &[
@@ -38,7 +38,7 @@ pub fn build_display_rows(model: &Model) -> Vec<DisplayRow> {
     let mut non_forwarded = Vec::new();
 
     for (i, port) in model.ports.iter().enumerate() {
-        if model.forwards.contains_key(&port.port) {
+        if model.forwards.contains_key(&ForwardKey::local(port.port)) {
             forwarded.push((port.port, DisplayRow::Port(i)));
         } else {
             non_forwarded.push(DisplayRow::Port(i));
@@ -47,9 +47,15 @@ pub fn build_display_rows(model: &Model) -> Vec<DisplayRow> {
 
     // Merge inactive forwards with active forwards, sorted together by port
     if model.show_inactive_forwards {
-        for (&port, entry) in &model.forwards {
-            if entry.status == ForwardStatus::Paused && !scan_ports.contains(&port) {
-                forwarded.push((port, DisplayRow::InactiveForward(port)));
+        for (key, entry) in &model.forwards {
+            if key.kind == ForwardKind::Local
+                && entry.status == ForwardStatus::Paused
+                && !scan_ports.contains(&key.remote_port)
+            {
+                forwarded.push((
+                    key.remote_port,
+                    DisplayRow::InactiveForward(key.remote_port),
+                ));
             }
         }
     }
@@ -118,7 +124,7 @@ pub fn render(model: &mut Model, frame: &mut Frame, area: Rect) {
             DisplayRow::InactiveForward(remote_port) => {
                 let local_port = model
                     .forwards
-                    .get(remote_port)
+                    .get(&ForwardKey::local(*remote_port))
                     .map_or(*remote_port, |e| e.local_port);
                 Row::new([
                     format!("||:{}", local_port),
@@ -207,7 +213,7 @@ fn render_splash(model: &Model, frame: &mut Frame, area: Rect, block: Block) {
 
 /// Returns (display_text, optional_style_override) for the FWD column.
 fn format_fwd(model: &Model, remote_port: u16) -> (String, Option<Style>) {
-    match model.forwards.get(&remote_port) {
+    match model.forwards.get(&ForwardKey::local(remote_port)) {
         Some(entry) => match &entry.status {
             ForwardStatus::Active => (
                 format!("->:{}", entry.local_port),

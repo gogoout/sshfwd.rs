@@ -5,7 +5,9 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use sshfwd_common::types::{Protocol, ScanResult};
 
 use crate::error::DiscoveryError;
-use crate::forward::{ForwardCommand, ForwardEntry, ForwardEvent, ForwardStatus};
+use crate::forward::{
+    ForwardCommand, ForwardEntry, ForwardEvent, ForwardKey, ForwardKind, ForwardStatus,
+};
 use crate::ui::table::{build_display_rows, DisplayRow};
 
 const STALENESS_THRESHOLD_SECS: u64 = 6;
@@ -57,7 +59,7 @@ pub struct Model {
     pub last_scan_at: Option<Instant>,
     pub running: bool,
     pub needs_render: bool,
-    pub forwards: HashMap<u16, ForwardEntry>,
+    pub forwards: HashMap<ForwardKey, ForwardEntry>,
     pub modal: ModalState,
     pub started_at: Instant,
     pub show_inactive_forwards: bool,
@@ -259,35 +261,37 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<ForwardCommand> {
         Message::ForwardEvent(evt) => {
             match evt {
                 ForwardEvent::Started {
+                    kind,
                     remote_port,
                     local_port,
                 } => {
-                    if let Some(entry) = model.forwards.get_mut(&remote_port) {
+                    if let Some(entry) = model.forwards.get_mut(&ForwardKey { kind, remote_port }) {
                         entry.local_port = local_port;
                         entry.status = ForwardStatus::Active;
                     }
                     save_forwards(model);
                 }
-                ForwardEvent::Stopped { remote_port } => {
-                    model.forwards.remove(&remote_port);
+                ForwardEvent::Stopped { kind, remote_port } => {
+                    model.forwards.remove(&ForwardKey { kind, remote_port });
                     save_forwards(model);
                     adjust_selection(model, Some(remote_port));
                 }
-                ForwardEvent::Paused { remote_port } => {
-                    if let Some(entry) = model.forwards.get_mut(&remote_port) {
+                ForwardEvent::Paused { kind, remote_port } => {
+                    if let Some(entry) = model.forwards.get_mut(&ForwardKey { kind, remote_port }) {
                         entry.status = ForwardStatus::Paused;
                     }
                 }
                 ForwardEvent::BindError {
+                    kind,
                     remote_port,
                     message,
                 } => {
                     let local_port_str = model
                         .forwards
-                        .get(&remote_port)
+                        .get(&ForwardKey { kind, remote_port })
                         .map(|e| format!("{}", e.local_port))
                         .unwrap_or_else(|| format!("{}", remote_port));
-                    model.forwards.remove(&remote_port);
+                    model.forwards.remove(&ForwardKey { kind, remote_port });
                     model.modal = ModalState::PortInput {
                         remote_port,
                         buffer: local_port_str,
@@ -296,8 +300,12 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<ForwardCommand> {
                     };
                     adjust_selection(model, Some(remote_port));
                 }
-                ForwardEvent::ConnectionCountChanged { remote_port, count } => {
-                    if let Some(entry) = model.forwards.get_mut(&remote_port) {
+                ForwardEvent::ConnectionCountChanged {
+                    kind,
+                    remote_port,
+                    count,
+                } => {
+                    if let Some(entry) = model.forwards.get_mut(&ForwardKey { kind, remote_port }) {
                         entry.active_connections = count;
                     }
                 }
@@ -402,15 +410,15 @@ fn handle_normal_key(model: &mut Model, key: KeyEvent) -> Vec<ForwardCommand> {
         }
         KeyCode::Enter | KeyCode::Char('f') => {
             if let Some(remote_port) = model.selected_port() {
-                if let std::collections::hash_map::Entry::Vacant(e) =
-                    model.forwards.entry(remote_port)
-                {
+                let key = ForwardKey::local(remote_port);
+                if let std::collections::hash_map::Entry::Vacant(e) = model.forwards.entry(key) {
                     e.insert(ForwardEntry {
                         local_port: remote_port,
                         status: ForwardStatus::Starting,
                         active_connections: 0,
                     });
                     commands.push(ForwardCommand::Start {
+                        kind: ForwardKind::Local,
                         remote_port,
                         local_port: remote_port,
                         remote_host: model.remote_host(),
@@ -418,7 +426,10 @@ fn handle_normal_key(model: &mut Model, key: KeyEvent) -> Vec<ForwardCommand> {
                     adjust_selection(model, Some(remote_port));
                     model.needs_render = true;
                 } else {
-                    commands.push(ForwardCommand::Stop { remote_port });
+                    commands.push(ForwardCommand::Stop {
+                        kind: ForwardKind::Local,
+                        remote_port,
+                    });
                 }
             }
         }
@@ -433,7 +444,7 @@ fn handle_normal_key(model: &mut Model, key: KeyEvent) -> Vec<ForwardCommand> {
 
 fn open_port_modal(model: &mut Model) {
     if let Some(remote_port) = model.selected_port() {
-        if !model.forwards.contains_key(&remote_port) {
+        if !model.forwards.contains_key(&ForwardKey::local(remote_port)) {
             model.modal = ModalState::PortInput {
                 remote_port,
                 buffer: format!("{}", remote_port),
@@ -466,12 +477,16 @@ fn handle_port_input_key(model: &mut Model, key: KeyEvent) -> Vec<ForwardCommand
         KeyCode::Enter => {
             if let Ok(local_port) = buffer.parse::<u16>() {
                 if local_port > 0 {
+                    let key = ForwardKey::local(remote_port);
                     // Stop existing forward if any
-                    if model.forwards.contains_key(&remote_port) {
-                        commands.push(ForwardCommand::Stop { remote_port });
+                    if model.forwards.contains_key(&key) {
+                        commands.push(ForwardCommand::Stop {
+                            kind: ForwardKind::Local,
+                            remote_port,
+                        });
                     }
                     model.forwards.insert(
-                        remote_port,
+                        key,
                         ForwardEntry {
                             local_port,
                             status: ForwardStatus::Starting,
@@ -479,6 +494,7 @@ fn handle_port_input_key(model: &mut Model, key: KeyEvent) -> Vec<ForwardCommand
                         },
                     );
                     commands.push(ForwardCommand::Start {
+                        kind: ForwardKind::Local,
                         remote_port,
                         local_port,
                         remote_host,
@@ -525,9 +541,10 @@ fn save_forwards(model: &Model) {
     let forwards: Vec<PersistedForward> = model
         .forwards
         .iter()
-        .map(|(&remote_port, entry)| PersistedForward {
-            remote_port,
+        .map(|(key, entry)| PersistedForward {
+            remote_port: key.remote_port,
             local_port: entry.local_port,
+            kind: key.kind,
         })
         .collect();
 

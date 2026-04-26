@@ -21,7 +21,7 @@ use ratatui::Terminal;
 use app::{Message, Model};
 use discovery::{DiscoveryEvent, DiscoveryStream};
 use forward::persistence;
-use forward::{ForwardEntry, ForwardManager, ForwardStatus};
+use forward::{ForwardEntry, ForwardKey, ForwardManager, ForwardStatus};
 
 fn main() {
     // Single-threaded runtime: no worker pool, no work-stealing overhead.
@@ -113,8 +113,12 @@ fn main() {
     // Load persisted forwards (all start as Paused — first scan triggers activation)
     let persisted = persistence::load_forwards(&destination);
     for pf in persisted {
+        let key = ForwardKey {
+            kind: pf.kind,
+            remote_port: pf.remote_port,
+        };
         model.forwards.insert(
-            pf.remote_port,
+            key,
             ForwardEntry {
                 local_port: pf.local_port,
                 status: ForwardStatus::Paused,

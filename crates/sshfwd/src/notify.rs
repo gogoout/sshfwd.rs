@@ -3,7 +3,7 @@ use std::time::Instant;
 
 use sshfwd_common::types::ListeningPort;
 
-use crate::forward::{ForwardEntry, ForwardStatus};
+use crate::forward::{ForwardEntry, ForwardKey, ForwardStatus};
 
 pub struct PortChange {
     pub port: u16,
@@ -22,7 +22,7 @@ pub enum PortChangeKind {
 pub fn detect_port_changes(
     prev_scan_ports: Option<&HashSet<u16>>,
     new_scan_ports: &HashSet<u16>,
-    forwards: &HashMap<u16, ForwardEntry>,
+    forwards: &HashMap<ForwardKey, ForwardEntry>,
     new_ports: &[ListeningPort],
     old_ports: &[ListeningPort],
 ) -> Vec<PortChange> {
@@ -38,7 +38,7 @@ pub fn detect_port_changes(
     appeared.sort();
     for port in appeared {
         let kind = if forwards
-            .get(&port)
+            .get(&ForwardKey::local(port))
             .is_some_and(|e| e.status == ForwardStatus::Starting)
         {
             PortChangeKind::Reactivated
@@ -256,11 +256,13 @@ mod tests {
 
     #[test]
     fn detects_reactivated_forward() {
+        use crate::forward::ForwardKey;
+
         let prev: HashSet<u16> = [80].into();
         let new: HashSet<u16> = [80, 5432].into();
         let mut forwards = HashMap::new();
         forwards.insert(
-            5432,
+            ForwardKey::local(5432),
             ForwardEntry {
                 local_port: 5432,
                 status: ForwardStatus::Starting,
