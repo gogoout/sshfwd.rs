@@ -15,7 +15,9 @@ A TUI-based SSH port forwarding management tool built with Rust. Inspired by [k9
 
 - **Automatic port detection** — deploys a lightweight agent that streams listening ports in real time
 - **One-key forwarding** — `Enter`/`f` to forward with matching local port, `F`/`Shift+Enter` for custom port
+- **Reverse forwarding** — press `m` to switch to Reverse mode; pick a local service and expose it on a remote port (SSH `-R` style)
 - **Smart lifecycle management** — auto-pauses when remote port disappears, reactivates when it returns (unlike VS Code's stale forwards)
+- **Auto-reconnect** — transparently reconnects with exponential backoff on connection drop; all forwards restore automatically
 - **Clear error recovery** — bind failures show a modal to choose a different port (no silent fallbacks)
 - **Visual grouping** — forwarded ports appear at the top, separated from unforwarded ports
 - **Inactive forward visibility** — toggle `p` to show persisted forwards whose remote port isn't running
@@ -60,8 +62,10 @@ sshfwd user@hostname --agent-path ./target/debug/sshfwd-agent
 
 ### TUI Interface
 
+**Forward mode** (default) — shows remote listening ports:
+
 ```
-╭ ● user@host │ 5 ports │ 2 fwd ────────────────────╮
+╭ ● user@host │ M:Fwd │ 5 ports │ 2 fwd ────────────╮
 │ FWD       PORT    PROTO   PID      COMMAND         │
 │▶->:5432  5432    tcp     1234     postgresql/15/..│
 │ ->:8080  8080    tcp6    5678     node server.js  │
@@ -69,8 +73,22 @@ sshfwd user@hostname --agent-path ./target/debug/sshfwd-agent
 │          3000    tcp     9012     ruby bin/rails s│
 │          6379    tcp     3456     redis-server    │
 ╰───────────────────────────────────────────────────╯
- <j/k>Navigate <g/G>Top/Bottom <Enter/f>Forward <F>Custom Port <p>Inactive <q>Quit
+ <j/k>Navigate <g/G>Top/Bottom <Enter/f>Forward <F>Custom Port <m>Mode <p>Inactive <q>Quit
 ```
+
+**Reverse mode** (`m` to toggle) — shows local listening ports and exposes them on the remote:
+
+```
+╭ ● user@host │ M:Rev │ 3 local ───────────────────╮
+│ FWD       PORT    PROTO   PID      COMMAND        │
+│▶<-:8080  3000    tcp     9012     ruby bin/rails │
+│          5173    tcp     1234     vite            │
+│          5432    tcp     3456     postgresql      │
+╰──────────────────────────────────────────────────╯
+ <j/k>Navigate <g/G>Top/Bottom <Enter>Reverse <m>Mode <p>Inactive <q>Quit
+```
+
+`<-:8080` means local port 3000 is exposed on remote port 8080. Press `Enter` on a local port to configure the remote bind port.
 
 Forwarded ports are grouped at the top with a visual separator.
 
@@ -96,8 +114,9 @@ When pressing `F`/`Shift+Enter`, or when a bind error occurs:
 | `k` / `Up` | Move selection up |
 | `g` | Jump to top |
 | `G` | Jump to bottom |
-| `Enter` / `f` | Toggle forwarding (same local port) |
-| `F` / `Shift+Enter` | Forward with custom local port (modal) |
+| `m` | Toggle Forward / Reverse mode |
+| `Enter` / `f` | Toggle forwarding (Forward: same local port; Reverse: opens modal) |
+| `F` / `Shift+Enter` | Forward with custom local port — Forward mode only |
 | `p` | Toggle inactive persisted forwards |
 | `q` / `Esc` / `Ctrl+C` | Quit |
 
@@ -147,10 +166,12 @@ See [CLAUDE.md](./CLAUDE.md) for development rules and workspace conventions.
 - Event loop uses the [dua-cli pattern](https://github.com/Byron/dua-cli): dedicated OS thread for keyboard input, `crossbeam_channel::select!` multiplexing
 
 **Port Forwarding:**
-- `ForwardManager` runs on a tokio runtime alongside discovery
-- Each forward binds a local `TcpListener`, accepts connections, and tunnels them via `russh` `channel_open_direct_tcpip`
-- Forward states: `Starting` → `Active` / `Paused` (port disappeared) / modal reopened on bind error
-- Forwards persist to `~/.sshfwd/forwards.json` keyed by destination
+- `ForwardManager` runs on a tokio runtime alongside discovery; one manager per session cycle, torn down and rebuilt on reconnect
+- **Local** (`->:N`): binds a local `TcpListener`, tunnels accepted connections via `channel_open_direct_tcpip`
+- **Reverse** (`<-:N`): calls `tcpip_forward` on the SSH server; incoming connections are pushed back via `server_channel_open_forwarded_tcpip` and forwarded to `127.0.0.1:local_port`
+- Forward states: `Starting` → `Active` / `Paused` (port disappeared or disconnected) / modal reopened on bind error
+- Forwards persist to `~/.sshfwd/forwards.json` keyed by destination; backward-compatible (old files load as Local)
+- Auto-reconnect: exponential backoff 0s → 30s cap; all listener tasks are aborted cleanly on disconnect so ports are released before the next bind
 
 **Data Flow:**
 ```
@@ -172,6 +193,7 @@ See [CLAUDE.md](./CLAUDE.md) for development rules and workspace conventions.
 - **Atomic upload** — temp file → `mv` → `chmod +x` prevents mid-upload execution
 - **Stale cleanup** — verifies `/proc/{pid}/comm` before killing to avoid hitting reused PIDs
 - **No random port fallback** — bind failures surface immediately via error modal so the user stays in control
+- **Reconnect over swap** — on disconnect, `ForwardManager` is torn down (aborting all listener tasks) and rebuilt fresh; simpler than live session swapping and reuses the existing reactivation path
 
 ## License
 
