@@ -295,16 +295,17 @@ async fn run_session_cycle(
 }
 
 /// Reconnect with exponential backoff until a new SSH session is established.
-/// Replaces `forwarded_rx` with a fresh channel pair wired into the new session.
+/// Returns the new session together with its paired forwarded-channel receiver.
+/// The first attempt is immediate; sleep only occurs after a failed attempt.
 async fn reconnect_with_backoff(
     destination: &str,
     disc_tx: &crossbeam_channel::Sender<Message>,
     backoff: &mut std::time::Duration,
-    forwarded_rx: &mut tokio::sync::mpsc::UnboundedReceiver<crate::ssh::session::IncomingForward>,
-) -> ssh::session::Session {
+) -> (
+    ssh::session::Session,
+    tokio::sync::mpsc::UnboundedReceiver<crate::ssh::session::IncomingForward>,
+) {
     loop {
-        tokio::time::sleep(*backoff).await;
-        *backoff = (*backoff * 2).min(std::time::Duration::from_secs(30));
         disc_tx.send(Message::Reconnecting).ok();
 
         let (ftx, frx) =
@@ -312,10 +313,12 @@ async fn reconnect_with_backoff(
         match ssh::session::Session::connect(destination, Some(ftx)).await {
             Ok(new_session) => {
                 *backoff = std::time::Duration::from_secs(1);
-                *forwarded_rx = frx;
-                return new_session;
+                return (new_session, frx);
             }
-            Err(_) => continue,
+            Err(_) => {
+                tokio::time::sleep(*backoff).await;
+                *backoff = (*backoff * 2).min(std::time::Duration::from_secs(30));
+            }
         }
     }
 }
@@ -354,13 +357,9 @@ async fn run_sidecar(
         // Session ended — notify model.
         disc_tx.send(Message::ConnectionLost).ok();
 
-        // Reconnect with backoff (replaces forwarded_rx).
-        let mut new_forwarded_rx =
-            tokio::sync::mpsc::unbounded_channel::<crate::ssh::session::IncomingForward>().1;
-        session =
-            reconnect_with_backoff(&destination, &disc_tx, &mut backoff, &mut new_forwarded_rx)
-                .await;
-        forwarded_rx = new_forwarded_rx;
+        // Reconnect with backoff; first attempt is immediate.
+        (session, forwarded_rx) =
+            reconnect_with_backoff(&destination, &disc_tx, &mut backoff).await;
 
         // Deploy agent on the new session.
         stream = loop {
@@ -369,14 +368,8 @@ async fn run_sidecar(
                 Err(_) => {
                     // Agent deploy failed — treat as another connection loss.
                     disc_tx.send(Message::ConnectionLost).ok();
-                    let mut new_frx = tokio::sync::mpsc::unbounded_channel::<
-                        crate::ssh::session::IncomingForward,
-                    >()
-                    .1;
-                    session =
-                        reconnect_with_backoff(&destination, &disc_tx, &mut backoff, &mut new_frx)
-                            .await;
-                    forwarded_rx = new_frx;
+                    (session, forwarded_rx) =
+                        reconnect_with_backoff(&destination, &disc_tx, &mut backoff).await;
                 }
             }
         };

@@ -321,13 +321,16 @@ impl ForwardManager {
     fn handle_pause_local(&mut self, key: ForwardKey) {
         if let Some(handle) = self.listeners.remove(&key) {
             handle.abort_handle.abort();
-            // Re-insert without abort handle — just remember the port mapping
+            // Re-insert to preserve local_port/remote_host for the Reactivate path.
+            // abort_handle is already aborted (abort() on it is a no-op); it is kept
+            // only because ListenerHandle requires one — handle_start_local will abort
+            // it again harmlessly when reactivating.
             self.listeners.insert(
                 key,
                 ListenerHandle {
                     local_port: handle.local_port,
                     remote_host: handle.remote_host,
-                    abort_handle: handle.abort_handle, // already aborted
+                    abort_handle: handle.abort_handle,
                 },
             );
         }
