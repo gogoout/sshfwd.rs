@@ -37,6 +37,9 @@ pub enum Message {
     DiscoveryWarning(String),
     DiscoveryError(DiscoveryError),
     StreamEnded,
+    // Local port scan
+    LocalScanReceived(ScanResult),
+    LocalScanError(String),
     // Keyboard
     Key(KeyEvent),
     // Mouse
@@ -53,6 +56,7 @@ pub struct Model {
     pub hostname: Option<String>,
     pub username: Option<String>,
     pub ports: Vec<sshfwd_common::types::ListeningPort>,
+    pub local_ports: Vec<sshfwd_common::types::ListeningPort>,
     pub scan_index: u64,
     pub selected_index: usize,
     pub connection_state: ConnectionState,
@@ -77,6 +81,7 @@ impl Model {
             hostname: None,
             username: None,
             ports: Vec::new(),
+            local_ports: Vec::new(),
             scan_index: 0,
             selected_index: 0,
             connection_state: ConnectionState::Connecting,
@@ -249,6 +254,12 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<ForwardCommand> {
             model.connection_state = ConnectionState::Disconnected;
             model.running = false;
             model.needs_render = true;
+        }
+        Message::LocalScanReceived(scan) => {
+            model.local_ports = scan.ports;
+        }
+        Message::LocalScanError(_) => {
+            // Silently ignore local scan errors for now
         }
         Message::Key(key) => match &model.modal {
             ModalState::None => {
