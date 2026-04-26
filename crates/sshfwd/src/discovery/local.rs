@@ -4,10 +4,12 @@ use sshfwd_common::scanner;
 
 use crate::app::Message;
 
+#[allow(dead_code)]
 const LOCAL_SCAN_INTERVAL: std::time::Duration = std::time::Duration::from_secs(2);
 
 /// Spawns a background task that scans local listening ports every 2 seconds.
 /// Returns a JoinHandle that can be aborted to stop the scan.
+#[allow(dead_code)]
 pub fn spawn_local_scan(tx: crossbeam_channel::Sender<Message>) -> JoinHandle<()> {
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(LOCAL_SCAN_INTERVAL);
