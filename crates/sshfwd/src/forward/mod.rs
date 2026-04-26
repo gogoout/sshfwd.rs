@@ -104,41 +104,52 @@ struct ListenerHandle {
 
 pub struct ForwardManager {
     session: Session,
-    cmd_rx: mpsc::UnboundedReceiver<ForwardCommand>,
     event_tx: crossbeam_channel::Sender<crate::app::Message>,
     listeners: HashMap<ForwardKey, ListenerHandle>,
-    forwarded_rx: tokio::sync::mpsc::UnboundedReceiver<IncomingForward>,
     /// Maps remote_port → local_port for active reverse forwards.
     reverse_map: HashMap<u16, u16>,
 }
 
 impl ForwardManager {
-    pub fn new(
-        session: Session,
-        cmd_rx: mpsc::UnboundedReceiver<ForwardCommand>,
-        event_tx: crossbeam_channel::Sender<crate::app::Message>,
-        forwarded_rx: tokio::sync::mpsc::UnboundedReceiver<IncomingForward>,
-    ) -> Self {
+    pub fn new(session: Session, event_tx: crossbeam_channel::Sender<crate::app::Message>) -> Self {
         Self {
             session,
-            cmd_rx,
             event_tx,
             listeners: HashMap::new(),
-            forwarded_rx,
             reverse_map: HashMap::new(),
         }
     }
 
-    pub async fn run(mut self) {
+    /// Drive the forward manager for one session lifetime.
+    ///
+    /// `cmd_rx` and `forwarded_rx` are borrowed so the sidecar can reuse them
+    /// across reconnect cycles without recreating the command channel.
+    /// `shutdown_rx` fires when the sidecar wants a graceful teardown (e.g.
+    /// the discovery stream ended).  On shutdown all local listener tasks are
+    /// aborted so their ports are released before the next session binds them.
+    pub async fn run(
+        mut self,
+        cmd_rx: &mut mpsc::UnboundedReceiver<ForwardCommand>,
+        forwarded_rx: &mut mpsc::UnboundedReceiver<IncomingForward>,
+        mut shutdown_rx: tokio::sync::oneshot::Receiver<()>,
+    ) {
         loop {
             tokio::select! {
-                cmd_opt = self.cmd_rx.recv() => {
+                biased;
+                _ = &mut shutdown_rx => {
+                    // Abort all local listeners so ports are released for the next session.
+                    for (_, handle) in self.listeners.drain() {
+                        handle.abort_handle.abort();
+                    }
+                    break;
+                }
+                cmd_opt = cmd_rx.recv() => {
                     match cmd_opt {
                         Some(cmd) => self.handle_command(cmd).await,
                         None => break,
                     }
                 }
-                inc_opt = self.forwarded_rx.recv() => {
+                inc_opt = forwarded_rx.recv() => {
                     if let Some(inc) = inc_opt {
                         self.handle_incoming(inc);
                     }

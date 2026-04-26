@@ -270,6 +270,7 @@ fn render_splash(model: &Model, frame: &mut Frame, area: Rect, block: Block) {
     let status_line = match model.connection_state {
         ConnectionState::Connecting => "Connecting...",
         ConnectionState::Connected => "Waiting for ports...",
+        ConnectionState::Reconnecting => "Reconnecting...",
         ConnectionState::Disconnected => "Disconnected",
     };
     // logo + blank + status = total content height

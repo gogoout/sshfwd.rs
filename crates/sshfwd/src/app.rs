@@ -16,6 +16,7 @@ const STALENESS_THRESHOLD_SECS: u64 = 6;
 pub enum ConnectionState {
     Connecting,
     Connected,
+    Reconnecting,
     Disconnected,
 }
 
@@ -46,6 +47,10 @@ pub enum Message {
     DiscoveryWarning(String),
     DiscoveryError(DiscoveryError),
     StreamEnded,
+    // Reconnect lifecycle
+    ConnectionLost,
+    Reconnecting,
+    Reconnected,
     // Local port scan
     LocalScanReceived(ScanResult),
     LocalScanError(String),
@@ -268,15 +273,36 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<ForwardCommand> {
             }
         }
         Message::DiscoveryWarning(_) => {}
-        Message::DiscoveryError(_) => {
-            model.connection_state = ConnectionState::Disconnected;
-            model.running = false;
+        Message::DiscoveryError(_) | Message::StreamEnded => {
+            // Reconnect loop handles recovery — do not exit.
+        }
+        Message::ConnectionLost => {
+            model.connection_state = ConnectionState::Reconnecting;
+            for entry in model.forwards.values_mut() {
+                entry.status = ForwardStatus::Paused;
+            }
             model.needs_render = true;
         }
-        Message::StreamEnded => {
-            model.connection_state = ConnectionState::Disconnected;
-            model.running = false;
+        Message::Reconnecting => {
+            // State stays Reconnecting; just trigger a UI refresh.
             model.needs_render = true;
+        }
+        Message::Reconnected => {
+            model.connection_state = ConnectionState::Connecting;
+            model.needs_render = true;
+            // Reactivate reverse forwards immediately — local forwards reactivate via
+            // reconcile_forwards on the next ScanReceived.
+            commands = model
+                .forwards
+                .iter()
+                .filter(|(k, _)| k.kind == ForwardKind::Reverse)
+                .map(|(k, e)| ForwardCommand::Reactivate {
+                    kind: ForwardKind::Reverse,
+                    remote_port: k.remote_port,
+                    local_port: e.local_port,
+                    remote_host: "127.0.0.1".to_string(),
+                })
+                .collect();
         }
         Message::LocalScanReceived(scan) => {
             model.local_ports = scan.ports;
@@ -362,6 +388,8 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<ForwardCommand> {
                 if last.elapsed().as_secs() >= STALENESS_THRESHOLD_SECS
                     && model.connection_state == ConnectionState::Connected
                 {
+                    // Mark stale-connected as disconnected; reconnect loop will
+                    // send ConnectionLost / Reconnecting separately.
                     model.connection_state = ConnectionState::Disconnected;
                     model.needs_render = true;
                 }

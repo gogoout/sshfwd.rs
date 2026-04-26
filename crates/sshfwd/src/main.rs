@@ -66,7 +66,7 @@ fn main() {
     // Connect and start discovery before entering TUI
     eprintln!("Connecting to {destination}...");
 
-    let (mut stream, session) = runtime.block_on(async {
+    let (initial_stream, session) = runtime.block_on(async {
         let session = match ssh::session::Session::connect(&destination, Some(forwarded_tx)).await {
             Ok(s) => s,
             Err(e) => {
@@ -156,45 +156,25 @@ fn main() {
     // Background channel — unbounded for infrequent discovery + tick + forward events
     let (bg_tx, bg_rx) = crossbeam_channel::unbounded::<Message>();
 
-    // Forward command channel (sync → async)
+    // Forward command channel (sync → async).
+    // The receiver is owned by the sidecar; it is reused across reconnect cycles
+    // so that the model's command stream is never interrupted.
     let (fwd_cmd_tx, fwd_cmd_rx) = tokio::sync::mpsc::unbounded_channel();
 
-    // Discovery + ForwardManager — share a single-threaded tokio runtime on one OS thread
+    // Discovery + ForwardManager sidecar with transparent reconnect.
     let disc_tx = bg_tx.clone();
     let fwd_event_tx = bg_tx.clone();
     std::thread::spawn(move || {
-        runtime.block_on(async move {
-            // Spawn ForwardManager as a tokio task on this runtime
-            let fwd_manager = ForwardManager::new(session, fwd_cmd_rx, fwd_event_tx, forwarded_rx);
-            let fwd_handle = tokio::spawn(fwd_manager.run());
-
-            // Run discovery loop
-            loop {
-                match stream.next_event().await {
-                    Some(DiscoveryEvent::Scan(scan)) => {
-                        if disc_tx.send(Message::ScanReceived(scan)).is_err() {
-                            break;
-                        }
-                    }
-                    Some(DiscoveryEvent::Warning(msg)) => {
-                        if disc_tx.send(Message::DiscoveryWarning(msg)).is_err() {
-                            break;
-                        }
-                    }
-                    Some(DiscoveryEvent::Error(e)) => {
-                        let _ = disc_tx.send(Message::DiscoveryError(e));
-                        break;
-                    }
-                    None => {
-                        let _ = disc_tx.send(Message::StreamEnded);
-                        break;
-                    }
-                }
-            }
-
-            // Keep runtime alive for ForwardManager after discovery ends
-            let _ = fwd_handle.await;
-        });
+        runtime.block_on(run_sidecar(
+            initial_stream,
+            session,
+            forwarded_rx,
+            fwd_cmd_rx,
+            disc_tx,
+            fwd_event_tx,
+            destination,
+            agent_path,
+        ));
     });
 
     // Tick thread — plain OS thread, no async needed
@@ -252,4 +232,156 @@ fn main() {
     terminal::disable_raw_mode().ok();
     io::stdout().execute(LeaveAlternateScreen).ok();
     process::exit(0);
+}
+
+/// Run one session cycle: drive discovery and ForwardManager concurrently.
+///
+/// Returns when the discovery stream ends.  The caller is responsible for
+/// reconnecting and calling this again with a fresh session / stream.
+/// `forwarded_rx` is consumed so callers can provide a fresh one on reconnect.
+async fn run_session_cycle(
+    mut stream: DiscoveryStream,
+    session: ssh::session::Session,
+    forwarded_rx: tokio::sync::mpsc::UnboundedReceiver<crate::ssh::session::IncomingForward>,
+    fwd_cmd_rx: &mut tokio::sync::mpsc::UnboundedReceiver<forward::ForwardCommand>,
+    disc_tx: crossbeam_channel::Sender<Message>,
+    fwd_event_tx: crossbeam_channel::Sender<Message>,
+) {
+    // Spawn local port scanner (aborted when this cycle ends).
+    let local_scan = discovery::local::spawn_local_scan(disc_tx.clone());
+
+    let manager = ForwardManager::new(session, fwd_event_tx);
+    let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
+
+    // `forwarded_rx` is owned for the duration of this cycle.
+    let mut forwarded_rx = forwarded_rx;
+    let manager_fut = manager.run(fwd_cmd_rx, &mut forwarded_rx, shutdown_rx);
+    tokio::pin!(manager_fut);
+
+    loop {
+        tokio::select! {
+            _ = &mut manager_fut => {
+                // Manager exited (cmd_tx closed or shutdown signal already fired).
+                break;
+            }
+            event = stream.next_event() => {
+                match event {
+                    Some(DiscoveryEvent::Scan(scan)) => {
+                        disc_tx.send(Message::ScanReceived(scan)).ok();
+                    }
+                    Some(DiscoveryEvent::Warning(w)) => {
+                        disc_tx.send(Message::DiscoveryWarning(w)).ok();
+                    }
+                    Some(DiscoveryEvent::Error(e)) => {
+                        disc_tx.send(Message::DiscoveryError(e)).ok();
+                        // Signal manager to shut down gracefully so local listener
+                        // tasks are aborted and their ports are released.
+                        let _ = shutdown_tx.send(());
+                        (&mut manager_fut).await;
+                        break;
+                    }
+                    None => {
+                        disc_tx.send(Message::StreamEnded).ok();
+                        let _ = shutdown_tx.send(());
+                        (&mut manager_fut).await;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    local_scan.abort();
+}
+
+/// Reconnect with exponential backoff until a new SSH session is established.
+/// Replaces `forwarded_rx` with a fresh channel pair wired into the new session.
+async fn reconnect_with_backoff(
+    destination: &str,
+    disc_tx: &crossbeam_channel::Sender<Message>,
+    backoff: &mut std::time::Duration,
+    forwarded_rx: &mut tokio::sync::mpsc::UnboundedReceiver<crate::ssh::session::IncomingForward>,
+) -> ssh::session::Session {
+    loop {
+        tokio::time::sleep(*backoff).await;
+        *backoff = (*backoff * 2).min(std::time::Duration::from_secs(30));
+        disc_tx.send(Message::Reconnecting).ok();
+
+        let (ftx, frx) =
+            tokio::sync::mpsc::unbounded_channel::<crate::ssh::session::IncomingForward>();
+        match ssh::session::Session::connect(destination, Some(ftx)).await {
+            Ok(new_session) => {
+                *backoff = std::time::Duration::from_secs(1);
+                *forwarded_rx = frx;
+                return new_session;
+            }
+            Err(_) => continue,
+        }
+    }
+}
+
+/// Top-level sidecar: outer reconnect loop wrapping session cycles.
+#[allow(clippy::too_many_arguments)]
+async fn run_sidecar(
+    initial_stream: DiscoveryStream,
+    initial_session: ssh::session::Session,
+    initial_forwarded_rx: tokio::sync::mpsc::UnboundedReceiver<
+        crate::ssh::session::IncomingForward,
+    >,
+    mut fwd_cmd_rx: tokio::sync::mpsc::UnboundedReceiver<forward::ForwardCommand>,
+    disc_tx: crossbeam_channel::Sender<Message>,
+    fwd_event_tx: crossbeam_channel::Sender<Message>,
+    destination: String,
+    agent_path: Option<PathBuf>,
+) {
+    let mut session = initial_session;
+    let mut stream = initial_stream;
+    let mut forwarded_rx = initial_forwarded_rx;
+    let mut backoff = std::time::Duration::from_secs(1);
+
+    loop {
+        // Run one session cycle (blocks until stream ends).
+        run_session_cycle(
+            stream,
+            session.clone(),
+            forwarded_rx,
+            &mut fwd_cmd_rx,
+            disc_tx.clone(),
+            fwd_event_tx.clone(),
+        )
+        .await;
+
+        // Session ended — notify model.
+        disc_tx.send(Message::ConnectionLost).ok();
+
+        // Reconnect with backoff (replaces forwarded_rx).
+        let mut new_forwarded_rx =
+            tokio::sync::mpsc::unbounded_channel::<crate::ssh::session::IncomingForward>().1;
+        session =
+            reconnect_with_backoff(&destination, &disc_tx, &mut backoff, &mut new_forwarded_rx)
+                .await;
+        forwarded_rx = new_forwarded_rx;
+
+        // Deploy agent on the new session.
+        stream = loop {
+            match DiscoveryStream::start(session.clone(), agent_path.as_deref()).await {
+                Ok(s) => break s,
+                Err(_) => {
+                    // Agent deploy failed — treat as another connection loss.
+                    disc_tx.send(Message::ConnectionLost).ok();
+                    let mut new_frx = tokio::sync::mpsc::unbounded_channel::<
+                        crate::ssh::session::IncomingForward,
+                    >()
+                    .1;
+                    session =
+                        reconnect_with_backoff(&destination, &disc_tx, &mut backoff, &mut new_frx)
+                            .await;
+                    forwarded_rx = new_frx;
+                }
+            }
+        };
+
+        // Notify model that a fresh session is live.
+        disc_tx.send(Message::Reconnected).ok();
+    }
 }

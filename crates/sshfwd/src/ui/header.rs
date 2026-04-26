@@ -9,6 +9,7 @@ pub fn build_title(model: &Model) -> Line<'static> {
     let (indicator, indicator_style) = match model.connection_state {
         ConnectionState::Connecting => (CONNECTING_CHAR, Style::default().fg(Color::Yellow)),
         ConnectionState::Connected => (CONNECTED_CHAR, Style::default().fg(Color::Green)),
+        ConnectionState::Reconnecting => (CONNECTING_CHAR, Style::default().fg(Color::Yellow)),
         ConnectionState::Disconnected => (DISCONNECT_CHAR, Style::default().fg(Color::Red)),
     };
 
