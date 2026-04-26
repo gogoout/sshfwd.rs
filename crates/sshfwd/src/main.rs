@@ -58,11 +58,16 @@ fn main() {
         }
     }
 
+    // Channel for incoming reverse-forwarded connections from the SSH server.
+    // Created before Session::connect so ClientHandler can deliver incoming channels.
+    let (forwarded_tx, forwarded_rx) =
+        tokio::sync::mpsc::unbounded_channel::<crate::ssh::session::IncomingForward>();
+
     // Connect and start discovery before entering TUI
     eprintln!("Connecting to {destination}...");
 
     let (mut stream, session) = runtime.block_on(async {
-        let session = match ssh::session::Session::connect(&destination, None).await {
+        let session = match ssh::session::Session::connect(&destination, Some(forwarded_tx)).await {
             Ok(s) => s,
             Err(e) => {
                 eprintln!("Connection failed: {e}");
@@ -153,14 +158,6 @@ fn main() {
 
     // Forward command channel (sync → async)
     let (fwd_cmd_tx, fwd_cmd_rx) = tokio::sync::mpsc::unbounded_channel();
-
-    // Channel for incoming reverse-forwarded connections from the SSH server.
-    // The sender will be wired into Session::connect in a future task; for now
-    // we create the pair and drop the sender so the channel is immediately closed
-    // (ForwardManager handles the closed channel gracefully via select!).
-    let (forwarded_tx, forwarded_rx) =
-        tokio::sync::mpsc::unbounded_channel::<crate::ssh::session::IncomingForward>();
-    drop(forwarded_tx); // Will be wired when Task B adds reconnect logic
 
     // Discovery + ForwardManager — share a single-threaded tokio runtime on one OS thread
     let disc_tx = bg_tx.clone();
