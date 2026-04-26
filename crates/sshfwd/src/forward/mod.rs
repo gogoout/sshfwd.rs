@@ -191,12 +191,7 @@ impl ForwardManager {
                 match kind {
                     ForwardKind::Local => self.handle_pause_local(key),
                     ForwardKind::Reverse => {
-                        // reconcile_forwards only sends Pause for Local forwards, so this
-                        // branch is only reachable if a caller explicitly pauses a Reverse
-                        // forward — which the current codebase never does. Treat it as a
-                        // no-op: the SSH server continues listening and reverse_map stays
-                        // intact. If explicit pause support is needed later, call
-                        // handle_stop_reverse instead.
+                        unreachable!("reconcile_forwards never pauses Reverse forwards")
                     }
                 }
             }

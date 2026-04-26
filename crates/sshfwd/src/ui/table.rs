@@ -29,7 +29,7 @@ pub enum DisplayRow {
     Port(usize),                 // index into model.ports (Forward mode)
     LocalPort(usize),            // index into model.local_ports (Reverse mode)
     InactiveForward(u16),        // remote port of a paused local forward not in current scan
-    InactiveReverseForward(u16), // local port of a paused reverse forward not in local scan
+    InactiveReverseForward(u16), // remote bind port (ForwardKey::remote_port) of a paused reverse forward not in local scan
     Separator,
 }
 

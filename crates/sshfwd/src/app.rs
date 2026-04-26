@@ -545,7 +545,13 @@ fn open_reverse_modal(model: &mut Model) -> Vec<ForwardCommand> {
                 kind: ForwardKind::Reverse,
                 remote_port: local_port,
             };
-            if !model.forwards.contains_key(&reverse_key) {
+            if model.forwards.contains_key(&reverse_key) {
+                // Active or Starting — stop the existing reverse forward.
+                commands.push(ForwardCommand::Stop {
+                    kind: ForwardKind::Reverse,
+                    remote_port: local_port,
+                });
+            } else {
                 model.modal = ModalState::PortInput {
                     kind: ForwardKind::Reverse,
                     remote_port: local_port,

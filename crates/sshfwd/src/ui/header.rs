@@ -17,7 +17,10 @@ pub fn build_title(model: &Model) -> Line<'static> {
         _ => model.destination.clone(),
     };
 
-    let port_count = model.ports.len();
+    let port_count = match model.mode {
+        AppMode::Forward => model.ports.len(),
+        AppMode::Reverse => model.local_ports.len(),
+    };
     let fwd_count = model
         .forwards
         .values()
