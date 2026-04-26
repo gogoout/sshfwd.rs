@@ -30,13 +30,6 @@ impl ForwardKey {
             remote_port,
         }
     }
-    #[allow(dead_code)]
-    pub fn reverse(remote_port: u16) -> Self {
-        Self {
-            kind: ForwardKind::Reverse,
-            remote_port,
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -198,14 +191,12 @@ impl ForwardManager {
                 match kind {
                     ForwardKind::Local => self.handle_pause_local(key),
                     ForwardKind::Reverse => {
-                        // Reverse forwards don't pause (no scan-driven lifecycle).
-                        // Just emit Paused event.
-                        let _ = self.event_tx.send(crate::app::Message::ForwardEvent(
-                            ForwardEvent::Paused {
-                                kind: key.kind,
-                                remote_port: key.remote_port,
-                            },
-                        ));
+                        // reconcile_forwards only sends Pause for Local forwards, so this
+                        // branch is only reachable if a caller explicitly pauses a Reverse
+                        // forward — which the current codebase never does. Treat it as a
+                        // no-op: the SSH server continues listening and reverse_map stays
+                        // intact. If explicit pause support is needed later, call
+                        // handle_stop_reverse instead.
                     }
                 }
             }
@@ -387,31 +378,20 @@ impl ForwardManager {
             return; // Unknown port — ignore
         };
 
-        let event_tx = self.event_tx.clone();
-        let remote_port = inc.remote_port;
-
         tokio::spawn(async move {
-            // Connect to the local target service
             let local_stream = match tokio::net::TcpStream::connect(("127.0.0.1", local_port)).await
             {
                 Ok(s) => s,
                 Err(_) => return,
             };
 
-            // Get the channel stream from the russh Channel
             let channel_stream = inc.channel.into_stream();
-
-            // Bidirectional copy
             let (mut ssh_r, mut ssh_w) = tokio::io::split(channel_stream);
             let (mut local_r, mut local_w) = tokio::io::split(local_stream);
             tokio::select! {
                 _ = tokio::io::copy(&mut local_r, &mut ssh_w) => {}
                 _ = tokio::io::copy(&mut ssh_r, &mut local_w) => {}
             }
-
-            // Keep event_tx alive for potential future connection count tracking
-            let _ = event_tx;
-            let _ = remote_port;
         });
     }
 }

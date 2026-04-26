@@ -50,7 +50,10 @@ impl client::Handler for ClientHandler {
     ) -> Result<(), Self::Error> {
         if let Some(tx) = &self.forwarded_tx {
             let _ = tx.send(IncomingForward {
-                remote_port: connected_port as u16,
+                remote_port: match u16::try_from(connected_port) {
+                    Ok(p) => p,
+                    Err(_) => return Ok(()),
+                },
                 channel,
             });
         }
