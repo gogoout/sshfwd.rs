@@ -15,7 +15,7 @@ pub fn render(model: &Model, frame: &mut Frame, area: Rect) {
             spans.extend(hotkey_spans("F", "Custom Port "));
         }
         AppMode::Reverse => {
-            spans.extend(hotkey_spans("Enter", "Reverse "));
+            spans.extend(hotkey_spans("Enter/f", "Reverse "));
         }
     }
     spans.extend(hotkey_spans("m", "Mode "));

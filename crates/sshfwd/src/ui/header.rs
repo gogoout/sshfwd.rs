@@ -51,7 +51,10 @@ pub fn build_title(model: &Model) -> Line<'static> {
         Span::raw(" "),
         Span::styled(conn_str, Style::default().fg(Color::Cyan)),
         Span::styled(
-            format!(" │ {} ports ", port_count),
+            match model.mode {
+                AppMode::Forward => format!(" │ {} remote ports ", port_count),
+                AppMode::Reverse => format!(" │ {} local ports ", port_count),
+            },
             Style::default().fg(Color::DarkGray),
         ),
     ];
