@@ -91,15 +91,20 @@ fn build_reverse_rows(model: &Model) -> Vec<DisplayRow> {
     let local_scan_ports: std::collections::HashSet<u16> =
         model.local_ports.iter().map(|p| p.port).collect();
 
+    // Reverse forwards are keyed by remote bind port; build a local_port → key map
+    // so we can match scan rows (organized by local port) to active forwards.
+    let reverse_by_local: std::collections::HashMap<u16, ForwardKey> = model
+        .forwards
+        .iter()
+        .filter(|(k, _)| k.kind == ForwardKind::Reverse)
+        .map(|(k, e)| (e.local_port, *k))
+        .collect();
+
     let mut reverse_forwarded = Vec::new();
     let mut non_reverse_forwarded = Vec::new();
 
     for (i, port) in model.local_ports.iter().enumerate() {
-        let reverse_key = ForwardKey {
-            kind: ForwardKind::Reverse,
-            remote_port: port.port,
-        };
-        if model.forwards.contains_key(&reverse_key) {
+        if reverse_by_local.contains_key(&port.port) {
             reverse_forwarded.push((port.port, DisplayRow::LocalPort(i)));
         } else {
             non_reverse_forwarded.push(DisplayRow::LocalPort(i));
@@ -320,20 +325,21 @@ fn format_local_fwd(model: &Model, remote_port: u16) -> (String, Option<Style>) 
 }
 
 /// Returns (display_text, optional_style_override) for the FWD column — reverse forward mode.
-/// `local_port` is the local port from the scan; we look up a Reverse forward keyed by it.
+/// `local_port` is the local port from the scan. Reverse forwards are keyed by remote bind
+/// port, so we search by `entry.local_port` to find the matching forward (if any).
 fn format_reverse_fwd(model: &Model, local_port: u16) -> (String, Option<Style>) {
-    let reverse_key = ForwardKey {
-        kind: ForwardKind::Reverse,
-        remote_port: local_port,
-    };
-    match model.forwards.get(&reverse_key) {
-        Some(entry) => match &entry.status {
+    let found = model
+        .forwards
+        .iter()
+        .find(|(k, e)| k.kind == ForwardKind::Reverse && e.local_port == local_port);
+    match found {
+        Some((key, entry)) => match &entry.status {
             ForwardStatus::Active => (
-                format!("<-:{}", reverse_key.remote_port),
+                format!("<-:{}", key.remote_port),
                 Some(Style::default().fg(Color::Green)),
             ),
             ForwardStatus::Paused => (
-                format!("||<-:{}", reverse_key.remote_port),
+                format!("||<-:{}", key.remote_port),
                 Some(Style::default().fg(Color::Yellow)),
             ),
             ForwardStatus::Starting => {
