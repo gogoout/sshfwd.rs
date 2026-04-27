@@ -463,11 +463,9 @@ fn handle_normal_key(model: &mut Model, key: KeyEvent) -> Vec<ForwardCommand> {
         KeyCode::Char('k') | KeyCode::Up => {
             move_selection_up(model);
         }
-        KeyCode::Char('g') => {
-            if model.selected_index != 0 {
-                model.selected_index = 0;
-                model.needs_render = true;
-            }
+        KeyCode::Char('g') if model.selected_index != 0 => {
+            model.selected_index = 0;
+            model.needs_render = true;
         }
         KeyCode::Char('G') => {
             let display_rows = build_display_rows(model);
@@ -500,10 +498,10 @@ fn handle_normal_key(model: &mut Model, key: KeyEvent) -> Vec<ForwardCommand> {
             adjust_selection(model, selected_port);
             model.needs_render = true;
         }
-        KeyCode::Enter if key.modifiers.contains(KeyModifiers::SHIFT) => {
-            if model.mode == AppMode::Forward {
-                open_local_forward_modal(model);
-            }
+        KeyCode::Enter
+            if key.modifiers.contains(KeyModifiers::SHIFT) && model.mode == AppMode::Forward =>
+        {
+            open_local_forward_modal(model);
         }
         KeyCode::Enter | KeyCode::Char('f') => match model.mode {
             AppMode::Forward => {
@@ -513,10 +511,8 @@ fn handle_normal_key(model: &mut Model, key: KeyEvent) -> Vec<ForwardCommand> {
                 commands = open_reverse_modal(model);
             }
         },
-        KeyCode::Char('F') => {
-            if model.mode == AppMode::Forward {
-                open_local_forward_modal(model);
-            }
+        KeyCode::Char('F') if model.mode == AppMode::Forward => {
+            open_local_forward_modal(model);
         }
         _ => {}
     }
