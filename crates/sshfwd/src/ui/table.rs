@@ -148,7 +148,7 @@ pub fn render(model: &mut Model, frame: &mut Frame, area: Rect) {
     let show_splash = match model.mode {
         AppMode::Forward => model.ports.is_empty() || model.started_at.elapsed().as_secs() < 1,
         AppMode::Reverse => {
-            model.local_ports.is_empty() && model.started_at.elapsed().as_secs() < 1
+            model.local_ports.is_empty() || model.started_at.elapsed().as_secs() < 1
         }
     };
     if show_splash {

@@ -84,8 +84,8 @@ fn scan_listening_ports() -> Result<Vec<ListeningPort>, AgentError> {
         }
     }
 
-    // Deduplicate: same port+protocol may appear multiple times (IPv4 and IPv6 listeners)
-    ports.sort_by_key(|p| (p.port, format!("{:?}", p.protocol)));
+    // Deduplicate: same port may appear multiple times (IPv4 and IPv6 listeners)
+    ports.sort_by_key(|p| p.port);
     ports.dedup_by_key(|p| p.port);
 
     Ok(ports)

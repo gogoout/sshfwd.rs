@@ -332,9 +332,18 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<ForwardCommand> {
                     save_forwards(model);
                 }
                 ForwardEvent::Stopped { kind, remote_port } => {
+                    let local_port = model
+                        .forwards
+                        .get(&ForwardKey { kind, remote_port })
+                        .map(|e| e.local_port);
                     model.forwards.remove(&ForwardKey { kind, remote_port });
                     save_forwards(model);
-                    adjust_selection(model, Some(remote_port));
+                    let hint = if kind == ForwardKind::Reverse {
+                        local_port.unwrap_or(remote_port)
+                    } else {
+                        remote_port
+                    };
+                    adjust_selection(model, Some(hint));
                 }
                 ForwardEvent::Paused { kind, remote_port } => {
                     if let Some(entry) = model.forwards.get_mut(&ForwardKey { kind, remote_port }) {
@@ -364,7 +373,12 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<ForwardCommand> {
                         },
                         error: Some(message),
                     };
-                    adjust_selection(model, Some(remote_port));
+                    let hint = if kind == ForwardKind::Reverse {
+                        failed_local_port
+                    } else {
+                        remote_port
+                    };
+                    adjust_selection(model, Some(hint));
                 }
                 ForwardEvent::ConnectionCountChanged {
                     kind,

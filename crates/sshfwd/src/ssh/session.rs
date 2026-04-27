@@ -98,7 +98,7 @@ impl Session {
 
             let (mut handle, jump_session) = if let Some(ref jump_dest) = cfg.proxy_jump {
                 // ProxyJump: connect through the jump host, then tunnel.
-                // Jump hops get None — only the final hop receives reverse forwards.
+                // The intermediate jump hop gets None; the final tunnel hop receives forwards.
                 let jump = Session::connect(jump_dest, None).await?;
 
                 let target_host = resolved_host.clone();
@@ -117,13 +117,18 @@ impl Session {
 
                 let tunnel = channel.into_stream();
                 let config = Arc::new(client::Config::default());
-                let handle =
-                    client::connect_stream(config, tunnel, ClientHandler { forwarded_tx: None })
-                        .await
-                        .map_err(|e| SshError::Connection {
-                            destination: destination.to_string(),
-                            source: e,
-                        })?;
+                let handle = client::connect_stream(
+                    config,
+                    tunnel,
+                    ClientHandler {
+                        forwarded_tx: forwarded_tx.clone(),
+                    },
+                )
+                .await
+                .map_err(|e| SshError::Connection {
+                    destination: destination.to_string(),
+                    source: e,
+                })?;
 
                 (handle, Some(Box::new(jump)))
             } else {

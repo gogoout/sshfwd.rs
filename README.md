@@ -65,27 +65,27 @@ sshfwd user@hostname --agent-path ./target/debug/sshfwd-agent
 **Forward mode** (default) — shows remote listening ports:
 
 ```
-╭ ● user@host │ M:Fwd │ 5 ports │ 2 fwd ────────────╮
+╭ ● user@host │ 5 remote ports │ 2 fwd │ M:Fwd ─────╮
 │ FWD       PORT    PROTO   PID      COMMAND         │
 │▶->:5432  5432    tcp     1234     postgresql/15/..│
 │ ->:8080  8080    tcp6    5678     node server.js  │
 │ ──────── ──────── ─────── ──────── ────────────────│
 │          3000    tcp     9012     ruby bin/rails s│
 │          6379    tcp     3456     redis-server    │
-╰───────────────────────────────────────────────────╯
+╰────────────────────────────────────────────────────╯
  <j/k>Navigate <g/G>Top/Bottom <Enter/f>Forward <F>Custom Port <m>Mode <p>Inactive <q>Quit
 ```
 
 **Reverse mode** (`m` to toggle) — shows local listening ports and exposes them on the remote:
 
 ```
-╭ ● user@host │ M:Rev │ 3 local ───────────────────╮
-│ FWD       PORT    PROTO   PID      COMMAND        │
-│▶<-:8080  3000    tcp     9012     ruby bin/rails │
-│          5173    tcp     1234     vite            │
-│          5432    tcp     3456     postgresql      │
-╰──────────────────────────────────────────────────╯
- <j/k>Navigate <g/G>Top/Bottom <Enter>Reverse <m>Mode <p>Inactive <q>Quit
+╭ ● user@host │ 3 local ports │ 1 rev │ M:Rev ──────╮
+│ FWD       PORT    PROTO   PID      COMMAND         │
+│▶<-:8080  3000    tcp     9012     ruby bin/rails s│
+│          5173    tcp     1234     vite             │
+│          5432    tcp     3456     postgresql       │
+╰────────────────────────────────────────────────────╯
+ <j/k>Navigate <g/G>Top/Bottom <Enter/f>Reverse <m>Mode <p>Inactive <q>Quit
 ```
 
 `<-:8080` means local port 3000 is exposed on remote port 8080. Press `Enter` on a local port to configure the remote bind port.

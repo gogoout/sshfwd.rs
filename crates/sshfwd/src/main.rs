@@ -280,12 +280,7 @@ async fn run_session_cycle(
                         (&mut manager_fut).await;
                         break;
                     }
-                    None => {
-                        disc_tx.send(Message::StreamEnded).ok();
-                        let _ = shutdown_tx.send(());
-                        (&mut manager_fut).await;
-                        break;
-                    }
+                    None => unreachable!("next_event always returns Some"),
                 }
             }
         }
@@ -343,6 +338,10 @@ async fn run_sidecar(
     let mut backoff = std::time::Duration::from_secs(1);
 
     loop {
+        // Notify model of fresh session — triggers Reverse forward reactivation
+        // (also fires on initial startup so persisted Reverse forwards activate).
+        disc_tx.send(Message::Reconnected).ok();
+
         // Run one session cycle (blocks until stream ends).
         run_session_cycle(
             stream,
@@ -373,8 +372,6 @@ async fn run_sidecar(
                 }
             }
         };
-
-        // Notify model that a fresh session is live.
-        disc_tx.send(Message::Reconnected).ok();
+        // Reconnected is sent at the top of the loop, before run_session_cycle.
     }
 }
