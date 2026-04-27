@@ -210,7 +210,6 @@ impl ForwardManager {
     }
 
     fn handle_start_local(&mut self, key: ForwardKey, local_port: u16, remote_host: String) {
-        // Stop existing listener if any
         if let Some(handle) = self.listeners.remove(&key) {
             handle.abort_handle.abort();
         }

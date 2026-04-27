@@ -284,7 +284,6 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<ForwardCommand> {
             model.needs_render = true;
         }
         Message::Reconnecting => {
-            // State stays Reconnecting; just trigger a UI refresh.
             model.needs_render = true;
         }
         Message::Reconnected => {

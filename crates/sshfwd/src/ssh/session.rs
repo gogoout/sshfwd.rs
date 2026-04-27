@@ -63,9 +63,10 @@ impl client::Handler for ClientHandler {
 
 /// SSH session backed by russh (pure Rust, zero child processes).
 ///
-/// Wrapped in `Arc<Mutex>` so the session can be shared between `AgentManager`
-/// (short-lived commands) and `DiscoveryStream` (keeps connection alive),
-/// and so `tcpip_forward` (&mut self) can be called through the shared handle.
+/// The handle is `Arc<Mutex<Handle>>` rather than bare `Arc<Handle>` because
+/// `Handle::tcpip_forward` takes `&mut self` — it awaits a reply on `Handle::receiver`,
+/// which requires exclusive access. `Handle` is not `Clone`, so `Mutex` is the only
+/// way to call `&mut self` methods through a shared reference.
 /// `_jump_session` keeps any ProxyJump hop alive for the connection's lifetime.
 #[derive(Clone)]
 pub struct Session {
