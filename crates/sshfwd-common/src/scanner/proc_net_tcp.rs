@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 use std::net::{Ipv4Addr, Ipv6Addr};
 
-use sshfwd_common::types::Protocol;
+use crate::types::Protocol;
 
 const LISTEN_STATE: &str = "0A";
 

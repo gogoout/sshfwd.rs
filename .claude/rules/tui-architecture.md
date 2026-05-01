@@ -23,6 +23,34 @@ All TUI state flows through `crates/sshfwd/src/app.rs`:
 - `view()` takes `&mut Model` — `render()` writes `table_state` and `table_content_area` for mouse hit-testing
 - Display rows and table grouping details: see [Port Forwarding](/.claude/rules/port-forwarding.md)
 
+## Connection state
+
+`ConnectionState` in `app.rs`:
+```rust
+pub enum ConnectionState { Connecting, Connected, Reconnecting, Disconnected }
+```
+
+Transitions:
+- Initial connect → `Connecting` → `Connected` on first `ScanReceived`
+- SSH drop → `ConnectionLost` message → `Reconnecting` (all `ForwardEntry.status` set to `Paused`)
+- Backoff loop sends `Reconnecting` messages while retrying
+- New session up → `Reconnected` message → `Connecting` (Reverse entries get `Reactivate` commands; Local entries reactivate via scan reconciliation)
+- First scan after reconnect → `Connected`
+
+`DiscoveryError` and `StreamEnded` do **not** set `model.running = false` — the sidecar reconnect loop manages session lifecycle.
+
+## Sidecar reconnect loop
+
+The sidecar thread (`main.rs`) runs `run_sidecar`, which contains an outer reconnect loop:
+
+1. `DiscoveryStream::start` for current session
+2. On success: send `Reconnected`, spawn local scan, create `ForwardManager`, drive discovery
+3. On discovery end: signal `ForwardManager` shutdown (oneshot), await graceful shutdown (aborts all listener tasks), abort local scan, send `ConnectionLost`
+4. Reconnect: send `Reconnecting` immediately, try `Session::connect`, sleep and double backoff (cap 30s) only on failure; reset backoff to 1s on success
+5. Loop from step 1
+
+`ForwardManager` is created per session cycle via `ForwardManager::new(session, event_tx)` and shut down via `shutdown_rx: oneshot::Receiver<()>`. The command channel receiver (`fwd_cmd_rx`) is owned by the sidecar and borrowed by each manager so queued commands survive reconnects.
+
 ## Exit gotcha
 
 `process::exit(0)` is called after terminal restore. Do NOT try graceful cleanup via destructors:

@@ -1,9 +1,8 @@
-mod scanner;
-
 use std::io::{self, Write};
 use std::thread;
 use std::time::Duration;
 
+use sshfwd_common::scanner::create_scanner;
 use sshfwd_common::types::{AgentError, AgentErrorKind, AgentResponse};
 
 const SCAN_INTERVAL: Duration = Duration::from_secs(2);
@@ -20,7 +19,7 @@ fn main() {
 
     write_pid_file();
 
-    let mut scanner = scanner::create_scanner();
+    let mut scanner = create_scanner();
     let stdout = io::stdout();
 
     loop {

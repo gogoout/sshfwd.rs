@@ -1,4 +1,4 @@
-use sshfwd_common::types::{AgentError, ScanResult};
+use crate::types::{AgentError, ScanResult};
 
 // Pure parsing logic — always compiled for testing on any platform
 pub mod proc_net_tcp;

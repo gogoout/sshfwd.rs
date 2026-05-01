@@ -4,10 +4,14 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+use crate::forward::ForwardKind;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PersistedForward {
     pub remote_port: u16,
     pub local_port: u16,
+    #[serde(default)]
+    pub kind: ForwardKind,
 }
 
 type ForwardsFile = HashMap<String, Vec<PersistedForward>>;

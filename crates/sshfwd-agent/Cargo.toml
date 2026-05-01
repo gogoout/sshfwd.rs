@@ -11,4 +11,3 @@ publish = false
 [dependencies]
 sshfwd-common = { workspace = true }
 serde_json = { workspace = true }
-libc = { workspace = true }

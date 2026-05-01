@@ -1,3 +1,5 @@
+pub mod local;
+
 use std::path::Path;
 
 use russh::client::Msg;

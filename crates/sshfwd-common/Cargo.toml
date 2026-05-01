@@ -11,5 +11,6 @@ keywords = ["ssh", "internal"]
 categories = ["command-line-utilities"]
 
 [dependencies]
+libc = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
