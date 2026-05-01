@@ -234,15 +234,19 @@ fn main() {
     process::exit(0);
 }
 
+/// If no discovery event arrives within this window, the session is treated as dead.
+/// The agent scans every ~2 s; 12 s gives 6× headroom before forcing a reconnect.
+const DISCOVERY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(12);
+
 /// Run one session cycle: drive discovery and ForwardManager concurrently.
 ///
-/// Returns when the discovery stream ends.  The caller is responsible for
+/// Returns when the discovery stream ends or times out.  The caller is responsible for
 /// reconnecting and calling this again with a fresh session / stream.
 /// `forwarded_rx` is consumed so callers can provide a fresh one on reconnect.
 async fn run_session_cycle(
     mut stream: DiscoveryStream,
     session: ssh::session::Session,
-    forwarded_rx: tokio::sync::mpsc::UnboundedReceiver<crate::ssh::session::IncomingForward>,
+    mut forwarded_rx: tokio::sync::mpsc::UnboundedReceiver<crate::ssh::session::IncomingForward>,
     fwd_cmd_rx: &mut tokio::sync::mpsc::UnboundedReceiver<forward::ForwardCommand>,
     disc_tx: crossbeam_channel::Sender<Message>,
     fwd_event_tx: crossbeam_channel::Sender<Message>,
@@ -253,8 +257,6 @@ async fn run_session_cycle(
     let manager = ForwardManager::new(session, fwd_event_tx);
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
 
-    // `forwarded_rx` is owned for the duration of this cycle.
-    let mut forwarded_rx = forwarded_rx;
     let manager_fut = manager.run(fwd_cmd_rx, &mut forwarded_rx, shutdown_rx);
     tokio::pin!(manager_fut);
 
@@ -264,23 +266,27 @@ async fn run_session_cycle(
                 // Manager exited (cmd_tx closed or shutdown signal already fired).
                 break;
             }
-            event = stream.next_event() => {
-                match event {
-                    Some(DiscoveryEvent::Scan(scan)) => {
+            result = tokio::time::timeout(DISCOVERY_TIMEOUT, stream.next_event()) => {
+                match result {
+                    Ok(Some(DiscoveryEvent::Scan(scan))) => {
                         disc_tx.send(Message::ScanReceived(scan)).ok();
                     }
-                    Some(DiscoveryEvent::Warning(w)) => {
+                    Ok(Some(DiscoveryEvent::Warning(w))) => {
                         disc_tx.send(Message::DiscoveryWarning(w)).ok();
                     }
-                    Some(DiscoveryEvent::Error(e)) => {
+                    Ok(Some(DiscoveryEvent::Error(e))) => {
                         disc_tx.send(Message::DiscoveryError(e)).ok();
-                        // Signal manager to shut down gracefully so local listener
-                        // tasks are aborted and their ports are released.
                         let _ = shutdown_tx.send(());
                         (&mut manager_fut).await;
                         break;
                     }
-                    None => unreachable!("next_event always returns Some"),
+                    Err(_) => {
+                        // No event within DISCOVERY_TIMEOUT — treat as dead session.
+                        let _ = shutdown_tx.send(());
+                        (&mut manager_fut).await;
+                        break;
+                    }
+                    Ok(None) => unreachable!("next_event always returns Some"),
                 }
             }
         }

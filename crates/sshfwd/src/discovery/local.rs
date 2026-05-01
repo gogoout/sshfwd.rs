@@ -13,7 +13,7 @@ pub fn spawn_local_scan(tx: crossbeam_channel::Sender<Message>) -> JoinHandle<()
         let mut interval = tokio::time::interval(LOCAL_SCAN_INTERVAL);
         loop {
             interval.tick().await;
-            let result = tokio::task::spawn_blocking(move || {
+            let result = tokio::task::spawn_blocking(|| {
                 let mut scanner = scanner::create_scanner();
                 scanner.scan()
             })

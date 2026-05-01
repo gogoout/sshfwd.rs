@@ -24,6 +24,9 @@ const SELECTED_STYLE: Style = Style::new()
     .bg(Color::DarkGray)
     .add_modifier(Modifier::BOLD);
 
+// Reused across all 5 columns of a separator row — avoids repeated allocation.
+const SEP: &str = "────────────────────";
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum DisplayRow {
     Port(usize),                 // index into model.ports (Forward mode)
@@ -31,6 +34,18 @@ pub enum DisplayRow {
     InactiveForward(u16),        // remote port of a paused local forward not in current scan
     InactiveReverseForward(u16), // remote bind port (ForwardKey::remote_port) of a paused reverse forward not in local scan
     Separator,
+}
+
+impl DisplayRow {
+    pub fn is_selectable(&self) -> bool {
+        matches!(
+            self,
+            DisplayRow::Port(_)
+                | DisplayRow::LocalPort(_)
+                | DisplayRow::InactiveForward(_)
+                | DisplayRow::InactiveReverseForward(_)
+        )
+    }
 }
 
 pub fn build_display_rows(model: &Model) -> Vec<DisplayRow> {
@@ -178,24 +193,12 @@ pub fn render(model: &mut Model, frame: &mut Frame, area: Rect) {
             DisplayRow::Port(i) => {
                 let port = &model.ports[*i];
                 let fwd_cell = format_local_fwd(model, port.port);
-                let proto = format!("{:?}", port.protocol).to_lowercase();
-                let (pid, cmd) = match &port.process {
-                    Some(p) => (format!("{}", p.pid), p.cmdline.clone()),
-                    None => ("-".to_string(), "-".to_string()),
-                };
-                Row::new([fwd_cell.0, format!("{}", port.port), proto, pid, cmd])
-                    .style(fwd_cell.1.unwrap_or_default())
+                make_port_row(fwd_cell, port)
             }
             DisplayRow::LocalPort(i) => {
                 let port = &model.local_ports[*i];
                 let fwd_cell = format_reverse_fwd(model, port.port);
-                let proto = format!("{:?}", port.protocol).to_lowercase();
-                let (pid, cmd) = match &port.process {
-                    Some(p) => (format!("{}", p.pid), p.cmdline.clone()),
-                    None => ("-".to_string(), "-".to_string()),
-                };
-                Row::new([fwd_cell.0, format!("{}", port.port), proto, pid, cmd])
-                    .style(fwd_cell.1.unwrap_or_default())
+                make_port_row(fwd_cell, port)
             }
             DisplayRow::InactiveForward(remote_port) => {
                 let local_port = model
@@ -204,7 +207,7 @@ pub fn render(model: &mut Model, frame: &mut Frame, area: Rect) {
                     .map_or(*remote_port, |e| e.local_port);
                 Row::new([
                     format!("||:{}", local_port),
-                    format!("{}", remote_port),
+                    remote_port.to_string(),
                     "-".to_string(),
                     "-".to_string(),
                     "(inactive)".to_string(),
@@ -213,14 +216,11 @@ pub fn render(model: &mut Model, frame: &mut Frame, area: Rect) {
             }
             DisplayRow::InactiveReverseForward(remote_port) => {
                 // remote_port is the ForwardKey's remote_port (the remote bind port)
-                let entry = model.forwards.get(&ForwardKey {
-                    kind: ForwardKind::Reverse,
-                    remote_port: *remote_port,
-                });
+                let entry = model.forwards.get(&ForwardKey::reverse(*remote_port));
                 let local_port = entry.map_or(*remote_port, |e| e.local_port);
                 Row::new([
                     format!("||<-:{}", remote_port),
-                    format!("{}", local_port),
+                    local_port.to_string(),
                     "-".to_string(),
                     "-".to_string(),
                     "(inactive)".to_string(),
@@ -228,15 +228,7 @@ pub fn render(model: &mut Model, frame: &mut Frame, area: Rect) {
                 .style(inactive_style)
             }
             DisplayRow::Separator => {
-                let sep = "─".repeat(20);
-                Row::new([
-                    sep.clone(),
-                    sep.clone(),
-                    sep.clone(),
-                    sep.clone(),
-                    sep.clone(),
-                ])
-                .style(Style::default().fg(Color::DarkGray))
+                Row::new([SEP, SEP, SEP, SEP, SEP]).style(Style::default().fg(Color::DarkGray))
             }
         })
         .collect();
@@ -302,6 +294,33 @@ fn render_splash(model: &Model, frame: &mut Frame, area: Rect, block: Block) {
 
     let paragraph = Paragraph::new(lines).centered();
     frame.render_widget(paragraph, content_area);
+}
+
+fn protocol_str(protocol: &sshfwd_common::types::Protocol) -> &'static str {
+    match protocol {
+        sshfwd_common::types::Protocol::Tcp => "tcp",
+        sshfwd_common::types::Protocol::Tcp6 => "tcp6",
+    }
+}
+
+/// Build a table row for a scanned port (shared between Forward and Reverse modes).
+fn make_port_row(
+    fwd_cell: (String, Option<Style>),
+    port: &sshfwd_common::types::ListeningPort,
+) -> Row<'static> {
+    let proto = protocol_str(&port.protocol);
+    let (pid, cmd) = match &port.process {
+        Some(p) => (p.pid.to_string(), p.cmdline.clone()),
+        None => ("-".to_string(), "-".to_string()),
+    };
+    Row::new([
+        fwd_cell.0,
+        port.port.to_string(),
+        proto.to_string(),
+        pid,
+        cmd,
+    ])
+    .style(fwd_cell.1.unwrap_or_default())
 }
 
 /// Returns (display_text, optional_style_override) for the FWD column — local forward mode.

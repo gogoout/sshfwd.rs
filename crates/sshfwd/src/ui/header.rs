@@ -22,12 +22,6 @@ pub fn build_title(model: &Model) -> Line<'static> {
         AppMode::Forward => model.ports.len(),
         AppMode::Reverse => model.local_ports.len(),
     };
-    let fwd_count = model
-        .forwards
-        .values()
-        .filter(|e| matches!(e.status, ForwardStatus::Active))
-        .count();
-
     let (mode_label, mode_style) = match model.mode {
         AppMode::Forward => (
             "M:Fwd",
@@ -59,33 +53,29 @@ pub fn build_title(model: &Model) -> Line<'static> {
         ),
     ];
 
-    if fwd_count > 0 {
-        let fwd_kind_count = model
-            .forwards
-            .iter()
-            .filter(|(k, e)| {
-                k.kind == ForwardKind::Local && matches!(e.status, ForwardStatus::Active)
-            })
-            .count();
-        let rev_kind_count = model
-            .forwards
-            .iter()
-            .filter(|(k, e)| {
-                k.kind == ForwardKind::Reverse && matches!(e.status, ForwardStatus::Active)
-            })
-            .count();
-        if fwd_kind_count > 0 {
-            spans.push(Span::styled(
-                format!("│ {} fwd ", fwd_kind_count),
-                Style::default().fg(Color::Green),
-            ));
-        }
-        if rev_kind_count > 0 {
-            spans.push(Span::styled(
-                format!("│ {} rev ", rev_kind_count),
-                Style::default().fg(Color::Magenta),
-            ));
-        }
+    let fwd_kind_count = model
+        .forwards
+        .iter()
+        .filter(|(k, e)| k.kind == ForwardKind::Local && matches!(e.status, ForwardStatus::Active))
+        .count();
+    let rev_kind_count = model
+        .forwards
+        .iter()
+        .filter(|(k, e)| {
+            k.kind == ForwardKind::Reverse && matches!(e.status, ForwardStatus::Active)
+        })
+        .count();
+    if fwd_kind_count > 0 {
+        spans.push(Span::styled(
+            format!("│ {} fwd ", fwd_kind_count),
+            Style::default().fg(Color::Green),
+        ));
+    }
+    if rev_kind_count > 0 {
+        spans.push(Span::styled(
+            format!("│ {} rev ", rev_kind_count),
+            Style::default().fg(Color::Magenta),
+        ));
     }
 
     spans.push(Span::raw("│ "));

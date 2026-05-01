@@ -186,15 +186,7 @@ fn adjust_selection(model: &mut Model, target_port: Option<u16>) {
     // Clamp to last selectable row
     let last_selectable = display_rows
         .iter()
-        .rposition(|dr| {
-            matches!(
-                dr,
-                DisplayRow::Port(_)
-                    | DisplayRow::LocalPort(_)
-                    | DisplayRow::InactiveForward(_)
-                    | DisplayRow::InactiveReverseForward(_)
-            )
-        })
+        .rposition(|dr| dr.is_selectable())
         .unwrap_or(0);
     if model.selected_index > last_selectable {
         model.selected_index = last_selectable;
@@ -304,7 +296,9 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<ForwardCommand> {
                 .collect();
         }
         Message::LocalScanReceived(scan) => {
+            let prev_selected = model.selected_port();
             model.local_ports = scan.ports;
+            adjust_selection(model, prev_selected);
             model.needs_render = true;
         }
         Message::LocalScanError(_) => {
@@ -365,7 +359,7 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<ForwardCommand> {
                         kind,
                         remote_port,
                         local_port: failed_local_port,
-                        buffer: format!("{}", failed_local_port),
+                        buffer: failed_local_port.to_string(),
                         remote_host: if kind == ForwardKind::Reverse {
                             "127.0.0.1".to_string()
                         } else {
@@ -469,15 +463,7 @@ fn handle_normal_key(model: &mut Model, key: KeyEvent) -> Vec<ForwardCommand> {
         }
         KeyCode::Char('G') => {
             let display_rows = build_display_rows(model);
-            if let Some(last) = display_rows.iter().rposition(|dr| {
-                matches!(
-                    dr,
-                    DisplayRow::Port(_)
-                        | DisplayRow::LocalPort(_)
-                        | DisplayRow::InactiveForward(_)
-                        | DisplayRow::InactiveReverseForward(_)
-                )
-            }) {
+            if let Some(last) = display_rows.iter().rposition(|dr| dr.is_selectable()) {
                 if model.selected_index != last {
                     model.selected_index = last;
                     model.needs_render = true;
@@ -508,7 +494,7 @@ fn handle_normal_key(model: &mut Model, key: KeyEvent) -> Vec<ForwardCommand> {
                 commands = handle_forward_action(model);
             }
             AppMode::Reverse => {
-                commands = open_reverse_modal(model);
+                commands = handle_reverse_action(model);
             }
         },
         KeyCode::Char('F') if model.mode == AppMode::Forward => {
@@ -555,7 +541,7 @@ fn open_local_forward_modal(model: &mut Model) {
                 kind: ForwardKind::Local,
                 remote_port,
                 local_port: remote_port,
-                buffer: format!("{}", remote_port),
+                buffer: remote_port.to_string(),
                 remote_host: model.remote_host(),
                 error: None,
             };
@@ -564,7 +550,7 @@ fn open_local_forward_modal(model: &mut Model) {
     }
 }
 
-fn open_reverse_modal(model: &mut Model) -> Vec<ForwardCommand> {
+fn handle_reverse_action(model: &mut Model) -> Vec<ForwardCommand> {
     let mut commands = Vec::new();
     let display_rows = build_display_rows(model);
     match display_rows.get(model.selected_index) {
@@ -595,7 +581,7 @@ fn open_reverse_modal(model: &mut Model) -> Vec<ForwardCommand> {
                     kind: ForwardKind::Reverse,
                     remote_port: local_port,
                     local_port,
-                    buffer: format!("{}", local_port),
+                    buffer: local_port.to_string(),
                     remote_host: "127.0.0.1".to_string(),
                     error: None,
                 };
@@ -662,15 +648,11 @@ fn handle_port_input_key(model: &mut Model, key: KeyEvent) -> Vec<ForwardCommand
                         }
                         ForwardKind::Reverse => {
                             // buffer holds the remote bind port; local_port is fixed
-                            let remote_bind_port = parsed_port;
-                            let fwd_key = ForwardKey {
-                                kind: ForwardKind::Reverse,
-                                remote_port: remote_bind_port,
-                            };
+                            let fwd_key = ForwardKey::reverse(parsed_port);
                             if model.forwards.contains_key(&fwd_key) {
                                 commands.push(ForwardCommand::Stop {
                                     kind: ForwardKind::Reverse,
-                                    remote_port: remote_bind_port,
+                                    remote_port: parsed_port,
                                 });
                             }
                             model.forwards.insert(
@@ -683,7 +665,7 @@ fn handle_port_input_key(model: &mut Model, key: KeyEvent) -> Vec<ForwardCommand
                             );
                             commands.push(ForwardCommand::Start {
                                 kind: ForwardKind::Reverse,
-                                remote_port: remote_bind_port,
+                                remote_port: parsed_port,
                                 local_port,
                                 remote_host,
                             });

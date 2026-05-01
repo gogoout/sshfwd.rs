@@ -30,6 +30,13 @@ impl ForwardKey {
             remote_port,
         }
     }
+
+    pub fn reverse(remote_port: u16) -> Self {
+        Self {
+            kind: ForwardKind::Reverse,
+            remote_port,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
