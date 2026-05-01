@@ -126,13 +126,11 @@ fn build_reverse_rows(model: &Model) -> Vec<DisplayRow> {
         }
     }
 
-    // Merge inactive reverse forwards (paused, whose local port is not in local scan)
+    // Merge inactive reverse forwards (any status, whose local port is not in local scan).
+    // An Active forward whose local service has stopped is also effectively inactive.
     if model.show_inactive_forwards {
         for (key, entry) in &model.forwards {
-            if key.kind == ForwardKind::Reverse
-                && entry.status == ForwardStatus::Paused
-                && !local_scan_ports.contains(&entry.local_port)
-            {
+            if key.kind == ForwardKind::Reverse && !local_scan_ports.contains(&entry.local_port) {
                 reverse_forwarded.push((
                     entry.local_port,
                     DisplayRow::InactiveReverseForward(key.remote_port),

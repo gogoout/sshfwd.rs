@@ -71,6 +71,14 @@ fn scan_listening_ports() -> Result<Vec<ListeningPort>, AgentError> {
             message: format!("lsof failed: {e}"),
         })?;
 
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(AgentError {
+            kind: AgentErrorKind::ScanFailed,
+            message: format!("lsof exited with {}: {}", output.status, stderr.trim()),
+        });
+    }
+
     let stdout = String::from_utf8_lossy(&output.stdout);
 
     // pid → ProcessInfo cache so we only read cmdline once per pid
