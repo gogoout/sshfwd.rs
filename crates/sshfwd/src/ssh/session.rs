@@ -311,7 +311,12 @@ async fn authenticate(
         if let Ok(identities) = agent.request_identities().await {
             for key in identities {
                 match handle
-                    .authenticate_publickey_with(user, key, rsa_hash, &mut agent)
+                    .authenticate_publickey_with(
+                        user,
+                        key.public_key().into_owned(),
+                        rsa_hash,
+                        &mut agent,
+                    )
                     .await
                 {
                     Ok(res) if res.success() => return Ok(true),
