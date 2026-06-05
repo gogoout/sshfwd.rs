@@ -74,6 +74,14 @@ pub enum ForwardCommand {
         kind: ForwardKind,
         remote_port: u16,
     },
+    UploadImage {
+        path: String,
+        bytes: Vec<u8>,
+    },
+    CleanupPasteUploads {
+        paths: Vec<String>,
+        done: crossbeam_channel::Sender<()>,
+    },
 }
 
 #[derive(Debug)]
@@ -100,6 +108,12 @@ pub enum ForwardEvent {
         kind: ForwardKind,
         remote_port: u16,
         count: u32,
+    },
+    ImageUploaded {
+        path: String,
+    },
+    ImageUploadFailed {
+        error: String,
     },
 }
 
@@ -213,7 +227,57 @@ impl ForwardManager {
                     }
                 }
             }
+            ForwardCommand::UploadImage { path, bytes } => {
+                self.handle_upload_image(path, bytes);
+            }
+            ForwardCommand::CleanupPasteUploads { paths, done } => {
+                self.handle_cleanup_paste_uploads(paths, done);
+            }
         }
+    }
+
+    fn handle_cleanup_paste_uploads(
+        &self,
+        paths: Vec<String>,
+        done: crossbeam_channel::Sender<()>,
+    ) {
+        let session = self.session.clone();
+        tokio::spawn(async move {
+            if !paths.is_empty() {
+                // Paths come from paste::spawn_paste (fixed prefix + unix-ms digits), so
+                // single-quote wrapping is sufficient. Same invariant as handle_upload_image.
+                let quoted: Vec<String> = paths.iter().map(|p| format!("'{p}'")).collect();
+                let cmd = format!("rm -f {}", quoted.join(" "));
+                let _ = session.exec(&cmd).await;
+            }
+            let _ = done.send(());
+        });
+    }
+
+    fn handle_upload_image(&self, path: String, bytes: Vec<u8>) {
+        let session = self.session.clone();
+        let event_tx = self.event_tx.clone();
+        tokio::spawn(async move {
+            // Path is constructed from a fixed prefix + unix-ms digits, so single-quote
+            // wrapping is sufficient to keep it shell-safe.
+            let cmd = format!("cat > '{path}' && chmod 600 '{path}'");
+            let event = match session.exec_with_stdin(&cmd, &bytes).await {
+                Ok(out) if out.success => ForwardEvent::ImageUploaded { path },
+                Ok(out) => {
+                    let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+                    let error = if stderr.is_empty() {
+                        "remote command failed".to_string()
+                    } else {
+                        stderr
+                    };
+                    ForwardEvent::ImageUploadFailed { error }
+                }
+                Err(e) => ForwardEvent::ImageUploadFailed {
+                    error: e.to_string(),
+                },
+            };
+            let _ = event_tx.send(crate::app::Message::ForwardEvent(event));
+        });
     }
 
     fn handle_start_local(&mut self, key: ForwardKey, local_port: u16, remote_host: String) {

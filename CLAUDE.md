@@ -17,6 +17,7 @@ TUI-based SSH port forwarding tool using ratatui, inspired by k9s.
 - [SSH Connection](/.claude/rules/ssh-connection.md) — russh, ssh2-config, ProxyJump, auth
 - [Agent & Platform](/.claude/rules/agent-platform.md) — adding platforms, cross-compilation, deployment
 - [Port Forwarding](/.claude/rules/port-forwarding.md) — ForwardManager, modal UI, persistence, display rows
+- [Clipboard Paste](/.claude/rules/clipboard-paste.md) — Ctrl+V flow, model channel handles, transient status, cleanup-on-exit pattern
 - [Publishing](/.claude/rules/publishing.md) — **NEVER `cargo publish` locally**, use GitHub Actions
 
 ## Verification
@@ -25,7 +26,7 @@ After making changes:
 ```bash
 cargo fmt -- --check
 cargo clippy --all-targets --all-features
-cargo test --workspace                      # 22 tests
+cargo test --workspace
 cargo build -p sshfwd
 ```
 
