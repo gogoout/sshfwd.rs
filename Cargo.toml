@@ -38,6 +38,12 @@ sha2 = "0.10"
 # Notifications
 notify-rust = "4"
 
+# Clipboard
+arboard = "3"
+
+# Image encoding
+png = "0.18"
+
 # Error handling
 thiserror = "2"
 

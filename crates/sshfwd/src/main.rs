@@ -5,6 +5,7 @@ mod error;
 mod event;
 mod forward;
 mod notify;
+mod paste;
 mod ssh;
 mod ui;
 
@@ -161,6 +162,9 @@ fn main() {
     // so that the model's command stream is never interrupted.
     let (fwd_cmd_tx, fwd_cmd_rx) = tokio::sync::mpsc::unbounded_channel();
 
+    model.fwd_cmd_tx = Some(fwd_cmd_tx.clone());
+    model.bg_tx = Some(bg_tx.clone());
+
     // Discovery + ForwardManager sidecar with transparent reconnect.
     let disc_tx = bg_tx.clone();
     let fwd_event_tx = bg_tx.clone();
@@ -231,6 +235,21 @@ fn main() {
     io::stdout().execute(DisableMouseCapture).ok();
     terminal::disable_raw_mode().ok();
     io::stdout().execute(LeaveAlternateScreen).ok();
+
+    if !model.paste_uploads.is_empty() {
+        let paths: Vec<String> = model.paste_uploads.iter().cloned().collect();
+        let (done_tx, done_rx) = crossbeam_channel::bounded::<()>(1);
+        if fwd_cmd_tx
+            .send(forward::ForwardCommand::CleanupPasteUploads {
+                paths,
+                done: done_tx,
+            })
+            .is_ok()
+        {
+            let _ = done_rx.recv_timeout(std::time::Duration::from_secs(3));
+        }
+    }
+
     process::exit(0);
 }
 

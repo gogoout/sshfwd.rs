@@ -32,3 +32,5 @@ crossterm = { workspace = true, features = ["use-dev-tty"] }
 crossbeam-channel = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 notify-rust = { workspace = true }
+arboard = { workspace = true }
+png = { workspace = true }

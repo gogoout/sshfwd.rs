@@ -22,6 +22,7 @@ A TUI-based SSH port forwarding management tool built with Rust. Inspired by [k9
 - **Visual grouping** — forwarded ports appear at the top, separated from unforwarded ports
 - **Inactive forward visibility** — toggle `p` to show persisted forwards whose remote port isn't running
 - **Desktop notifications** — batched notifications when ports appear, disappear, or reactivate (disable with `--no-notify`)
+- **Clipboard image paste** — `Ctrl+V` uploads the local clipboard image to `/tmp/sshfwd-<ms>.png` on the remote and replaces the clipboard with the remote path (great for pasting screenshots into a remote Claude Code or other tool). On X11 the pasted path is only available while sshfwd is running, due to a standard X11 selection limitation.
 - **Session persistence** — remembers active forwards per destination in `~/.sshfwd/forwards.json`
 - **Pure Rust SSH** — no system OpenSSH dependency, uses `russh` for in-process connections
 - **ProxyJump support** — recursive tunneling through jump hosts via SSH config
@@ -73,7 +74,7 @@ sshfwd user@hostname --agent-path ./target/debug/sshfwd-agent
 │          3000    tcp     9012     ruby bin/rails s│
 │          6379    tcp     3456     redis-server    │
 ╰────────────────────────────────────────────────────╯
- <j/k>Navigate <g/G>Top/Bottom <Enter/f>Forward <F>Custom Port <m>Mode <p>Inactive <q>Quit
+ <j/k>Navigate <g/G>Top/Bottom <Enter/f>Forward <F>Custom Port <m>Mode <p>Inactive <C-v>Paste image <q>Quit
 ```
 
 **Reverse mode** (`m` to toggle) — shows local listening ports and exposes them on the remote:
@@ -85,7 +86,7 @@ sshfwd user@hostname --agent-path ./target/debug/sshfwd-agent
 │          5173    tcp     1234     vite             │
 │          5432    tcp     3456     postgresql       │
 ╰────────────────────────────────────────────────────╯
- <j/k>Navigate <g/G>Top/Bottom <Enter/f>Reverse <m>Mode <p>Inactive <q>Quit
+ <j/k>Navigate <g/G>Top/Bottom <Enter/f>Reverse <m>Mode <p>Inactive <C-v>Paste image <q>Quit
 ```
 
 `<-:8080` means local port 3000 is exposed on remote port 8080. Press `Enter` on a local port to configure the remote bind port.
@@ -118,6 +119,7 @@ When pressing `F`/`Shift+Enter`, or when a bind error occurs:
 | `Enter` / `f` | Toggle forwarding (Forward: same local port; Reverse: opens modal) |
 | `F` / `Shift+Enter` | Forward with custom local port — Forward mode only |
 | `p` | Toggle inactive persisted forwards |
+| `Ctrl+V` | Upload clipboard image to remote `/tmp` and copy the remote path locally |
 | `q` / `Esc` / `Ctrl+C` | Quit |
 
 ## Development

@@ -21,6 +21,7 @@ All TUI state flows through `crates/sshfwd/src/app.rs`:
 
 - `needs_render` flag: skip draw calls when state hasn't visually changed
 - `view()` takes `&mut Model` — `render()` writes `table_state` and `table_content_area` for mouse hit-testing
+- **Channel handles on Model**: `model.fwd_cmd_tx` and `model.bg_tx` are clones of the sidecar command channel and main background channel, populated by `main.rs` after channels exist. Use them when a UI handler needs to dispatch async work that returns results via the normal `bg_rx → update()` path (sync I/O like clipboard reads in particular). See [Clipboard Paste](/.claude/rules/clipboard-paste.md).
 - Display rows and table grouping details: see [Port Forwarding](/.claude/rules/port-forwarding.md)
 
 ## Connection state
@@ -56,3 +57,5 @@ The sidecar thread (`main.rs`) runs `run_sidecar`, which contains an outer recon
 `process::exit(0)` is called after terminal restore. Do NOT try graceful cleanup via destructors:
 - crossterm `read()` thread has no clean cancellation
 - Remote agent is cleaned up via stale PID mechanism on next connection
+
+For pre-exit work that needs the live SSH session (e.g. deleting remote files), pass a `crossbeam_channel::Sender<()>` inside the `ForwardCommand` variant and `recv_timeout` on the matching receiver. See the cleanup-on-exit pattern in [Clipboard Paste](/.claude/rules/clipboard-paste.md#cleanup-on-exit).

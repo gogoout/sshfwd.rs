@@ -8,6 +8,7 @@ use crate::error::DiscoveryError;
 use crate::forward::{
     ForwardCommand, ForwardEntry, ForwardEvent, ForwardKey, ForwardKind, ForwardStatus,
 };
+use crate::paste::{self, TransientStatus};
 use crate::ui::table::{build_display_rows, DisplayRow};
 
 const STALENESS_THRESHOLD_SECS: u64 = 6;
@@ -87,6 +88,10 @@ pub struct Model {
     pub notify_batch: crate::notify::NotifyBatch,
     pub table_state: ratatui::widgets::TableState,
     pub table_content_area: Option<ratatui::layout::Rect>,
+    pub transient_status: Option<TransientStatus>,
+    pub fwd_cmd_tx: Option<tokio::sync::mpsc::UnboundedSender<ForwardCommand>>,
+    pub bg_tx: Option<crossbeam_channel::Sender<Message>>,
+    pub paste_uploads: HashSet<String>,
 }
 
 impl Model {
@@ -113,6 +118,10 @@ impl Model {
             notify_batch: crate::notify::NotifyBatch::default(),
             table_state: ratatui::widgets::TableState::default(),
             table_content_area: None,
+            transient_status: None,
+            fwd_cmd_tx: None,
+            bg_tx: None,
+            paste_uploads: HashSet::new(),
         }
     }
 
@@ -383,6 +392,15 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<ForwardCommand> {
                         entry.active_connections = count;
                     }
                 }
+                ForwardEvent::ImageUploaded { path } => {
+                    paste::set_clipboard_text(path.clone());
+                    model.paste_uploads.insert(path.clone());
+                    model.transient_status = Some(TransientStatus::ok(format!("Uploaded: {path}")));
+                }
+                ForwardEvent::ImageUploadFailed { error } => {
+                    model.transient_status =
+                        Some(TransientStatus::err(format!("Paste failed: {error}")));
+                }
             }
             model.needs_render = true;
         }
@@ -403,6 +421,14 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<ForwardCommand> {
             }
             // Flush batched notifications after debounce window
             model.notify_batch.flush_if_ready(&model.destination);
+            if model
+                .transient_status
+                .as_ref()
+                .is_some_and(|s| s.is_expired())
+            {
+                model.transient_status = None;
+                model.needs_render = true;
+            }
         }
         Message::Resize(_, _) => {
             model.needs_render = true;
@@ -450,6 +476,9 @@ fn handle_normal_key(model: &mut Model, key: KeyEvent) -> Vec<ForwardCommand> {
         }
         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             model.running = false;
+        }
+        KeyCode::Char('v') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            handle_paste_image(model);
         }
         KeyCode::Char('j') | KeyCode::Down => {
             move_selection_down(model);
@@ -504,6 +533,27 @@ fn handle_normal_key(model: &mut Model, key: KeyEvent) -> Vec<ForwardCommand> {
     }
 
     commands
+}
+
+fn handle_paste_image(model: &mut Model) {
+    if model.connection_state != ConnectionState::Connected {
+        model.transient_status = Some(TransientStatus::err(
+            "Paste failed: not connected".to_string(),
+        ));
+        model.needs_render = true;
+        return;
+    }
+    match (model.fwd_cmd_tx.clone(), model.bg_tx.clone()) {
+        (Some(fwd_tx), Some(bg_tx)) => {
+            paste::spawn_paste(fwd_tx, bg_tx);
+        }
+        _ => {
+            model.transient_status = Some(TransientStatus::err(
+                "Paste failed: internal channel missing".to_string(),
+            ));
+            model.needs_render = true;
+        }
+    }
 }
 
 fn handle_forward_action(model: &mut Model) -> Vec<ForwardCommand> {
