@@ -49,6 +49,8 @@ if !model.paste_uploads.is_empty() {
 
 **Pattern for any future "do X before exit" feature**: pass a `crossbeam_channel::Sender<()>` inside the `ForwardCommand` variant, block main on the matching receiver with a short timeout. Do NOT try to do cleanup via destructors — the `process::exit(0)` gotcha from [TUI Architecture](/.claude/rules/tui-architecture.md#exit-gotcha) skips them. The 3s timeout is essential: if the SSH session is mid-reconnect, the cleanup command queues but won't run, and we must not block shutdown indefinitely.
 
+**Known limitation — cleanup race during reconnect:** `fwd_cmd_rx` is only drained by `ForwardManager::run`, which is only running inside an active session cycle. If the user quits while `run_sidecar` is inside `reconnect_with_backoff` (sleep up to 30s), the cleanup command queues but never reaches the manager before the 3s timeout fires, leaving orphan `/tmp/sshfwd-*.png` files. This matches the project's existing best-effort cleanup philosophy ([Agent & Platform](/.claude/rules/agent-platform.md)) — `/tmp` is OS-cleaned on reboot. A fix would require either signaling the sidecar to abort backoff, or holding an `Arc<Mutex<Session>>` shared with main; both are significantly more invasive than the current pattern.
+
 ## Shell safety
 
 Paths are constructed from a fixed prefix + Unix-ms digits only, so single-quote wrapping (`'<path>'`) is sufficient. If you ever derive a path from user/clipboard input, swap to proper escaping.

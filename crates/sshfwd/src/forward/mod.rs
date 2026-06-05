@@ -244,6 +244,8 @@ impl ForwardManager {
         let session = self.session.clone();
         tokio::spawn(async move {
             if !paths.is_empty() {
+                // Paths come from paste::spawn_paste (fixed prefix + unix-ms digits), so
+                // single-quote wrapping is sufficient. Same invariant as handle_upload_image.
                 let quoted: Vec<String> = paths.iter().map(|p| format!("'{p}'")).collect();
                 let cmd = format!("rm -f {}", quoted.join(" "));
                 let _ = session.exec(&cmd).await;

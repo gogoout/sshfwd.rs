@@ -5,13 +5,14 @@ use ratatui::Frame;
 
 use super::hotkey_spans;
 use crate::app::{AppMode, Model};
+use crate::paste::TransientStatusKind;
 
 pub fn render(model: &Model, frame: &mut Frame, area: Rect) {
     if let Some(status) = model.transient_status.as_ref().filter(|s| !s.is_expired()) {
-        let color = if status.is_error {
-            Color::Red
-        } else {
-            Color::Green
+        let color = match status.kind {
+            TransientStatusKind::Ok => Color::Green,
+            TransientStatusKind::Pending => Color::Yellow,
+            TransientStatusKind::Err => Color::Red,
         };
         let line = Line::from(vec![
             Span::raw(" "),

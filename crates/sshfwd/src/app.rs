@@ -393,7 +393,9 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<ForwardCommand> {
                     }
                 }
                 ForwardEvent::ImageUploaded { path } => {
-                    paste::set_clipboard_text(path.clone());
+                    if let Some(bg_tx) = model.bg_tx.clone() {
+                        paste::set_clipboard_text(path.clone(), bg_tx);
+                    }
                     model.paste_uploads.insert(path.clone());
                     model.transient_status = Some(TransientStatus::ok(format!("Uploaded: {path}")));
                 }
@@ -546,6 +548,8 @@ fn handle_paste_image(model: &mut Model) {
     match (model.fwd_cmd_tx.clone(), model.bg_tx.clone()) {
         (Some(fwd_tx), Some(bg_tx)) => {
             paste::spawn_paste(fwd_tx, bg_tx);
+            model.transient_status = Some(TransientStatus::pending("Uploading...".to_string()));
+            model.needs_render = true;
         }
         _ => {
             model.transient_status = Some(TransientStatus::err(

@@ -6,12 +6,26 @@ use tokio::sync::mpsc::UnboundedSender;
 use crate::app::Message;
 use crate::forward::{ForwardCommand, ForwardEvent};
 
-pub const TRANSIENT_STATUS_TTL: Duration = Duration::from_secs(1);
+pub const TRANSIENT_STATUS_TTL: Duration = Duration::from_secs(2);
+/// Upper bound — pending statuses are normally replaced by the result event
+/// long before this fires. Acts as a safety net if the upload silently hangs.
+pub const PENDING_STATUS_TTL: Duration = Duration::from_secs(30);
+
+/// Reject paste-uploads larger than this so a stray huge clipboard image
+/// doesn't block ForwardManager (every other forward command queues behind
+/// the SSH stdin pipe during the upload).
+const MAX_UPLOAD_BYTES: usize = 10_000_000;
+
+pub enum TransientStatusKind {
+    Ok,
+    Pending,
+    Err,
+}
 
 pub struct TransientStatus {
     pub text: String,
     pub expires_at: Instant,
-    pub is_error: bool,
+    pub kind: TransientStatusKind,
 }
 
 impl TransientStatus {
@@ -19,7 +33,15 @@ impl TransientStatus {
         Self {
             text,
             expires_at: Instant::now() + TRANSIENT_STATUS_TTL,
-            is_error: false,
+            kind: TransientStatusKind::Ok,
+        }
+    }
+
+    pub fn pending(text: String) -> Self {
+        Self {
+            text,
+            expires_at: Instant::now() + PENDING_STATUS_TTL,
+            kind: TransientStatusKind::Pending,
         }
     }
 
@@ -27,7 +49,7 @@ impl TransientStatus {
         Self {
             text,
             expires_at: Instant::now() + TRANSIENT_STATUS_TTL,
-            is_error: true,
+            kind: TransientStatusKind::Err,
         }
     }
 
@@ -72,6 +94,12 @@ pub fn spawn_paste(fwd_tx: UnboundedSender<ForwardCommand>, bg_tx: Sender<Messag
             }
         };
 
+        if png_bytes.len() > MAX_UPLOAD_BYTES {
+            let mb = png_bytes.len() as f64 / 1_000_000.0;
+            send_err(format!("image too large ({mb:.1} MB)"));
+            return;
+        }
+
         let ms = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_millis())
@@ -90,11 +118,17 @@ pub fn spawn_paste(fwd_tx: UnboundedSender<ForwardCommand>, bg_tx: Sender<Messag
     });
 }
 
-/// Replace the local clipboard contents with `path`. Fire-and-forget.
-pub fn set_clipboard_text(path: String) {
+/// Replace the local clipboard contents with `path`. Fire-and-forget for the
+/// success path; if the clipboard set fails the user is told via the footer so
+/// they don't see "Uploaded" and then silently get the wrong clipboard.
+pub fn set_clipboard_text(path: String, bg_tx: Sender<Message>) {
     std::thread::spawn(move || {
-        if let Ok(mut cb) = arboard::Clipboard::new() {
-            let _ = cb.set_text(path);
+        let result =
+            arboard::Clipboard::new().and_then(|mut cb| cb.set_text(path.as_str().to_owned()));
+        if let Err(e) = result {
+            let _ = bg_tx.send(Message::ForwardEvent(ForwardEvent::ImageUploadFailed {
+                error: format!("uploaded to {path}, but clipboard set failed: {e}"),
+            }));
         }
     });
 }
