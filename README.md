@@ -22,7 +22,7 @@ A TUI-based SSH port forwarding management tool built with Rust. Inspired by [k9
 - **Visual grouping** — forwarded ports appear at the top, separated from unforwarded ports
 - **Inactive forward visibility** — toggle `p` to show persisted forwards whose remote port isn't running
 - **Desktop notifications** — batched notifications when ports appear, disappear, or reactivate (disable with `--no-notify`)
-- **Clipboard image paste** — `Ctrl+V` uploads the local clipboard image to `/tmp/sshfwd-<ms>.png` on the remote and replaces the clipboard with the remote path (great for pasting screenshots into a remote Claude Code or other tool). On X11 the pasted path is only available while sshfwd is running, due to a standard X11 selection limitation.
+- **Clipboard image paste** — `Ctrl+V` uploads the local clipboard image to `/tmp/sshfwd-<ms>.png` on the remote and replaces the clipboard with the remote path (great for pasting screenshots into a remote Claude Code or other tool). On bare X11 without a clipboard manager, the pasted path may be lost before you can use it; any modern X11 desktop (GNOME, KDE, etc.) ships a clipboard manager and works normally.
 - **Session persistence** — remembers active forwards per destination in `~/.sshfwd/forwards.json`
 - **Pure Rust SSH** — no system OpenSSH dependency, uses `russh` for in-process connections
 - **ProxyJump support** — recursive tunneling through jump hosts via SSH config

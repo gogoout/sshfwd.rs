@@ -24,11 +24,12 @@ This is the pattern to use when a UI handler needs to **dispatch async work AND 
 
 ## Transient status
 
-`paste::TransientStatus { text, expires_at, is_error }` with TTL `TRANSIENT_STATUS_TTL` (currently 1s). Lives in `model.transient_status`.
+`paste::TransientStatus { text, expires_at, kind: TransientStatusKind }` lives in `model.transient_status`. `Kind` has three variants: `Ok` and `Err` use `TRANSIENT_STATUS_TTL` (currently 2s); `Pending` uses `PENDING_STATUS_TTL` (30s safety net — normally replaced by the result event well before then).
 
-- Set on `ImageUploaded` (ok) / `ImageUploadFailed` (err) / pre-flight checks in `handle_paste_image` (err).
-- Expired in the existing `Tick` handler (which fires every 1s — actual on-screen time is 1–2s depending on tick alignment).
-- Rendered by `ui::hotkey_bar::render`: when present and not expired, the status text **replaces** the hotkey row (green for ok, red for err). When None/expired, normal hotkeys render.
+- Set to `Pending` (`"Uploading..."`) in `handle_paste_image` when the upload is queued.
+- Set to `Ok` / `Err` on `ImageUploaded` / `ImageUploadFailed`. Pre-flight checks in `handle_paste_image` also set `Err`.
+- Expired in the existing `Tick` handler (which fires every 1s — actual on-screen time is TTL to TTL+1s depending on tick alignment).
+- Rendered by `ui::hotkey_bar::render`: when present and not expired, the status text **replaces** the hotkey row (green for `Ok`, yellow for `Pending`, red for `Err`). When `None`/expired, normal hotkeys render.
 
 If you need to show feedback for some other transient action, reuse `TransientStatus` rather than inventing a new mechanism.
 
@@ -57,7 +58,7 @@ Paths are constructed from a fixed prefix + Unix-ms digits only, so single-quote
 
 ## X11 caveat
 
-On X11, the local clipboard only persists while sshfwd is running (standard X11 selection limitation — arboard does not fork to persist). Acceptable for the primary use case (user pastes path into another terminal while sshfwd is still up). Not an issue on macOS, Wayland, or Windows.
+`paste::set_clipboard_text` writes via `arboard::Clipboard::set_text` on a short-lived background thread, then drops the `Clipboard`. On X11, `arboard` owns the clipboard selection via an internal event-loop thread embedded in the `Clipboard` struct — when it drops, the selection is released. With a clipboard manager running (GNOME, KDE, `clipmenu`, `parcellite`, etc., which is the default on essentially all modern X11 desktops), the manager preserves the content and paste works normally. On **bare X11 without a clipboard manager** the path is lost before the user can paste it. Not an issue on macOS, Wayland (which all common compositors persist via their own manager), or Windows. If a real user reports paste-not-working on X11, the fix is either: hold the `Clipboard` alive in `set_clipboard_text` with a short `sleep`, or move clipboard ownership to a long-lived thread with a shutdown signal.
 
 ## Dependencies
 
