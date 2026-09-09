@@ -4,7 +4,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use russh::client::{self, Msg};
-use russh::{ChannelMsg, ChannelStream};
+use russh::{ChannelMsg, ChannelOpenFailure, ChannelStream};
 use tokio::sync::Mutex;
 
 use super::config;
@@ -33,7 +33,7 @@ impl client::Handler for ClientHandler {
 
     async fn check_server_key(
         &mut self,
-        _server_public_key: &russh::keys::PublicKey,
+        _server_public_key: &russh::keys::PublicKeyOrCertificate,
     ) -> Result<bool, Self::Error> {
         // Accept all host keys (matches previous KnownHosts::Accept behavior)
         Ok(true)
@@ -46,17 +46,25 @@ impl client::Handler for ClientHandler {
         connected_port: u32,
         _originator_address: &str,
         _originator_port: u32,
+        reply: russh::client::ChannelOpenHandle,
         _session: &mut russh::client::Session,
     ) -> Result<(), Self::Error> {
-        if let Some(tx) = &self.forwarded_tx {
-            let _ = tx.send(IncomingForward {
-                remote_port: match u16::try_from(connected_port) {
-                    Ok(p) => p,
-                    Err(_) => return Ok(()),
-                },
-                channel,
-            });
-        }
+        // `forwarded_tx` is None on ProxyJump hops, which never serve reverse forwards.
+        let (Some(tx), Ok(remote_port)) = (&self.forwarded_tx, u16::try_from(connected_port))
+        else {
+            reply
+                .reject(ChannelOpenFailure::AdministrativelyProhibited)
+                .await;
+            return Ok(());
+        };
+
+        // Confirm the channel before handing it off, so the consumer task can never
+        // write to it ahead of the open confirmation.
+        reply.accept().await;
+        let _ = tx.send(IncomingForward {
+            remote_port,
+            channel,
+        });
         Ok(())
     }
 }
